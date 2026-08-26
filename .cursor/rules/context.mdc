@@ -1,0 +1,608 @@
+---
+description: IMUM Test Day project context, task goals, dataset insights, and business semantics
+alwaysApply: true
+---
+
+# IMUM Test Day — Project Context
+
+## Purpose
+
+This is an IMUM Senior Software Developer Test Day task.
+
+The goal is to prepare a **script/process that structures and normalizes scraped product data** so the resulting data can later be used reliably in:
+
+- product matching
+- candidate validation
+- product comparison
+- package/quantity comparison
+- normalized price comparison
+
+This is primarily a **data normalization and data-quality problem**, not a scraping task and not a full product-matching implementation.
+
+Trustworthy, explainable data is more important than extracting every possible field.
+
+---
+
+# Original Task
+
+IMUM provided these subgoals:
+
+1. **MKV is the main source**
+   - It contains many different categories.
+   - Determine a useful final normalized structure.
+   - Discover category-specific nuances and important insights.
+
+2. **Prepare metrics and a dashboard**
+   - Explain why the chosen structure makes sense.
+   - Show where normalization differs by category/source.
+   - Estimate and demonstrate the quality of the process.
+
+3. **Normalize price per unit**
+   - Example: if a box contains `200 vnt.` / 200 pieces, calculate price per item.
+   - Competitors may sell the same underlying item individually or in different package quantities.
+   - Other meaningful quantity bases such as volume, mass, or area may also need normalization where semantics are clear.
+
+4. **Apply the approach to other sources**
+   - TOP
+   - SNK
+   - BNU
+   - BNU represents a different product domain but is more standardized.
+
+---
+
+# Business Context
+
+IMUM works with scraped retailer/e-commerce data.
+
+Scraped rows are not consistently structured:
+
+```text
+retailer page
+    ↓
+scraped CSV
+    ↓
+partially structured / inconsistent product data
+    ↓
+normalization
+    ↓
+comparable product facts
+    ↓
+candidate matching
+    ↓
+candidate validation
+````
+
+In the real matching workflow, a client product may have multiple competitor candidates.
+
+Normalization should make it easier to decide:
+
+```text
+same product
+different variant
+different package
+different product
+ambiguous / insufficient evidence
+```
+
+A sophisticated matching engine is **not the primary deliverable for this task** unless explicitly requested later.
+
+The normalized representation should simply be useful for such downstream matching/validation.
+
+---
+
+# Available Data
+
+Datasets are currently stored under:
+
+```text
+datasets/
+├── mkv-data.csv
+├── snk-data.csv
+├── top-products.csv
+└── bnu-data.csv
+```
+
+Approximate observed dataset characteristics should be revalidated by profiling code rather than hardcoded into application logic.
+
+---
+
+## MKV
+
+Primary dataset.
+
+Approximately:
+
+* 73k products
+* 19 major categories
+* many subcategories / third-level categories
+* heterogeneous DIY/home/building catalogue
+* brand present for many but not all products
+* model often missing
+* no reliable barcode field
+* important identity/package information frequently exists only in title or metadata
+
+MKV contains many different measurement semantics.
+
+Examples include:
+
+```text
+3.9 x 25 mm, 1000 vnt.
+2.5 L
+150 x 70 cm
+750 ml x 12 vnt.
+```
+
+These values cannot all be interpreted the same way.
+
+MKV should drive discovery of the canonical structure and normalization rules.
+
+---
+
+## SNK
+
+Approximately 11k+ products.
+
+Generally more structured than MKV.
+
+Useful characteristics include:
+
+* strong brand coverage
+* barcode availability
+* structured metadata
+* explicit package-related information for many products
+
+SNK can therefore act both as:
+
+1. another source to normalize into the common representation
+2. a useful validation source for some title-derived values
+
+For example:
+
+```text
+title: "... 250 vnt."
+structured package field: 250
+```
+
+Comparing independently available signals can provide measurable normalization-quality metrics.
+
+---
+
+## TOP
+
+Approximately 1k+ products.
+
+More standardized electronics/appliance-oriented data.
+
+Characteristics include strong:
+
+* brand information
+* model information
+* barcode information
+
+TOP should help verify that the normalized structure is not unnecessarily tied to MKV-specific assumptions.
+
+---
+
+## BNU
+
+Approximately 21k+ pharmacy products across Baltic markets.
+
+BNU is a different product domain but much more standardized.
+
+Typical useful fields include:
+
+* manufacturer
+* barcode
+* form
+* active substance
+* strength
+* amount in package
+
+Example title:
+
+```text
+Paracetamol 500 mg N20
+```
+
+Semantically:
+
+```text
+500 mg = product strength
+N20    = package count
+```
+
+The normalization model must not confuse these concepts.
+
+BNU is useful as a final test that the common structure can support another domain without redesigning the whole process.
+
+---
+
+# Critical Data Semantics
+
+## A measurement does not automatically define product identity
+
+Always reason about **what the measurement represents**.
+
+### Equivalent representation
+
+```text
+1 L
+1000 ml
+```
+
+These represent the same quantity after unit conversion.
+
+Likewise:
+
+```text
+0.75 L
+750 ml
+```
+
+---
+
+### Package difference
+
+```text
+200 vnt.
+1 vnt.
+```
+
+These may still represent the same underlying item sold in different package quantities.
+
+This is exactly why normalized price per unit is useful.
+
+Do not automatically reject such products as different.
+
+---
+
+### Product-defining dimensions
+
+```text
+KOLO OPAL PLUS 150 x 70 cm
+KOLO OPAL PLUS 170 x 70 cm
+```
+
+Brand/model may match, but dimensions describe different product variants.
+
+For exact product validation, this difference matters.
+
+---
+
+### Product specification
+
+Examples:
+
+```text
+6 mm drill bit
+10 mm drill bit
+```
+
+or:
+
+```text
+500 mg medicine
+1000 mg medicine
+```
+
+These measurements describe the product itself, not the package denominator.
+
+---
+
+### Ambiguous values
+
+If the semantic meaning cannot be determined confidently:
+
+```text
+do not guess
+→ preserve the raw value
+→ leave derived value unset
+→ expose a warning / unresolved state
+```
+
+---
+
+# Product Identity vs Retail Offer
+
+A useful mental model is to distinguish:
+
+## Product identity
+
+What is the actual item?
+
+Possible signals:
+
+* brand
+* manufacturer
+* model
+* normalized title
+* product type
+* dimensions
+* strength
+* technical specifications
+* domain-specific attributes
+
+## Retail offer / package
+
+How is this retailer selling it?
+
+Possible signals:
+
+* package count
+* quantity per item
+* total quantity
+* volume
+* mass
+* area
+* bundle contents
+* current price
+* price per item / liter / kg / m²
+
+This distinction is important because two retailers can sell the same underlying product using different package sizes.
+
+---
+
+# Price Normalization
+
+Only derive normalized prices when the denominator has clear business meaning.
+
+Examples:
+
+```text
+€20 / 200 pieces
+→ €0.10 per item
+```
+
+```text
+€10 / 2 L
+→ €5 per liter
+```
+
+```text
+€12 / 3 kg
+→ €4 per kg
+```
+
+```text
+€25 / 5 m²
+→ €5 per m²
+```
+
+Do not calculate meaningless values merely because a number and unit are present.
+
+Example:
+
+```text
+Bathtub 170 x 70 cm
+```
+
+The dimensions identify the product.
+
+They are not a valid basis for `price per cm`.
+
+---
+
+# Bundles and Complex Packaging
+
+Some products may contain both a package quantity and extra bundled items.
+
+Example:
+
+```text
+750 ml x 12 vnt. + additional tool/accessory
+```
+
+The core quantity may be extractable:
+
+```text
+item quantity = 750 ml
+count = 12
+```
+
+but price comparability may be weaker because the offer contains an additional bundled item.
+
+Such cases should remain visible rather than being presented as perfectly equivalent.
+
+---
+
+# What "Apply to Other Sources" Means
+
+The intended direction is:
+
+```text
+MKV raw data ─┐
+SNK raw data ─┤
+TOP raw data ─┼─> common normalized representation
+BNU raw data ─┘
+```
+
+It does **not** mean building four unrelated normalization systems.
+
+Each source may require different extraction/mapping because its raw fields differ, while the meaningful normalized concepts should be reused wherever possible.
+
+Source-specific or category-specific behavior is acceptable when justified by real semantic differences.
+
+---
+
+# Quality Philosophy
+
+Do not optimize for:
+
+```text
+100% field coverage
+```
+
+at the cost of incorrect values.
+
+Prefer:
+
+```text
+high-confidence normalization
++
+explicit unresolved cases
++
+measurable quality
+```
+
+Useful quality signals include:
+
+* processing coverage
+* quantity extraction coverage
+* package-count coverage
+* normalized price coverage
+* warning rate
+* unresolved rate
+* invalid/missing input rate
+* agreement between independently available data signals
+* quality differences by category/source
+
+Avoid arbitrary confidence percentages without evidence.
+
+---
+
+# Dashboard Purpose
+
+The dashboard is an **explanation and inspection layer**, not the core system.
+
+It should help answer:
+
+### What happened?
+
+```text
+How many rows were processed?
+How many values were normalized?
+How many unit prices were derived?
+How many warnings/unresolved cases exist?
+```
+
+### Where is the data different?
+
+```text
+Which categories use count?
+Which use volume?
+Which use mass?
+Which contain dimensions/specifications?
+Which categories have higher ambiguity?
+```
+
+### Why does the structure make sense?
+
+Show representative:
+
+```text
+raw product
+    ↓
+normalized interpretation
+    ↓
+derived comparable values
+    ↓
+warnings / reasoning
+```
+
+### How trustworthy is the process?
+
+Use measurable metrics and representative failure cases.
+
+---
+
+# Expected End-to-End Journey
+
+```text
+RAW CSV
+   ↓
+inspect/profile
+   ↓
+preserve source/raw values
+   ↓
+normalize common textual/numeric representation
+   ↓
+extract candidate quantities/attributes
+   ↓
+interpret their semantic meaning
+   ↓
+canonicalize compatible units
+   ↓
+derive package/quantity information
+   ↓
+derive price-per-unit only where valid
+   ↓
+validate consistency
+   ↓
+record warnings/unresolved cases
+   ↓
+produce normalized output
+   ↓
+calculate quality/category/source metrics
+   ↓
+show results in dashboard
+   ↓
+verify that the same model works across
+MKV → SNK/TOP → BNU
+```
+
+---
+
+# Scope Boundaries
+
+For this Test Day, do not assume the project requires:
+
+* database storage
+* external APIs
+* new scraping
+* distributed workers
+* queues
+* authentication
+* production infrastructure
+* ML/embedding matching
+* a complete competitor matching engine
+
+These can be downstream capabilities.
+
+The current task is to make the provided datasets **structured, comparable, explainable, and trustworthy enough to support matching/validation later**.
+
+---
+
+# Working Principle
+
+Use an evidence-driven loop:
+
+```text
+PROFILE
+   ↓
+OBSERVE PATTERNS
+   ↓
+FORM A SMALL RULE
+   ↓
+NORMALIZE
+   ↓
+MEASURE
+   ↓
+INSPECT FAILURES
+   ↓
+REFINE
+```
+
+Do not invent a complete normalization taxonomy before inspecting real data.
+
+When a repeated edge case appears, solve the smallest meaningful class of cases rather than adding a one-off hack.
+
+---
+
+# Success Criteria
+
+A strong result should demonstrate that:
+
+1. MKV can be transformed into a useful normalized product representation.
+2. Product attributes and package/offer attributes are not confused.
+3. Unit conversion is semantically correct.
+4. Price-per-unit is calculated only when meaningful.
+5. Ambiguous data is visible rather than silently guessed.
+6. Category-specific nuances are measurable and explainable.
+7. Quality can be estimated using actual evidence.
+8. SNK and TOP can use the same conceptual normalized structure.
+9. BNU can extend the same core model despite being a different domain.
+10. The resulting data is clearly more useful for downstream product matching and validation.
+
+# Core Principle
+
+**Correct, observable, explainable normalization is more valuable than maximum extraction coverage.**

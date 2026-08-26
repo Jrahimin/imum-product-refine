@@ -1,0 +1,32 @@
+---
+alwaysApply: true
+---
+Use Next.js + TypeScript.
+
+Normalization logic must remain plain TypeScript and independent of UI.
+
+Pipeline:
+
+raw row
+→ source-specific extraction
+→ common normalization
+→ validation
+→ metrics
+→ JSON
+→ dashboard
+
+Rules:
+- preserve raw title/source identifiers
+- source adapters should produce one common NormalizedProduct shape
+- common unit conversion should be reused across sources
+- distinguish:
+  - package count
+  - purchasable quantity
+  - physical dimensions
+  - product specifications
+  - strength/dosage
+- derive unit price only when denominator semantics are trustworthy
+- ambiguous cases should produce warnings rather than guessed values
+- keep processing deterministic and testable
+- avoid premature generic frameworks or category-rule engines
+- keep dashboard presentation separate from normalization
