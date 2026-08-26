@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "profile": "tsx src/scripts/profile.ts",
-    "normalize": "tsx src/scripts/normalize.ts"
+    "normalize": "tsx src/scripts/normalize.ts",
+    "test": "tsx --test src/lib/normalization/normalization.test.ts src/lib/artifacts.test.ts"
   },
   "dependencies": {
     "csv-parse": "^7.0.2",

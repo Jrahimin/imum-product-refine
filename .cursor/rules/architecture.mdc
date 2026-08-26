@@ -30,3 +30,19 @@ Rules:
 - keep processing deterministic and testable
 - avoid premature generic frameworks or category-rule engines
 - keep dashboard presentation separate from normalization
+
+## Code readability and learning-oriented structure
+
+The codebase should be easy to navigate and understand during live review.
+
+- Every function should have a short one-line JSDoc/comment stating its purpose.
+- Keep functions small and single-purpose with descriptive names.
+- Add short inline comments around important parsing/normalization/validation branches explaining **why the rule is safe or why a value is rejected**.
+- Prefer comments such as:
+  `// Dimensions describe product identity here, not a pricing quantity.`
+  over comments that merely restate syntax.
+- In source adapters, keep the flow visually clear:
+  identity → taxonomy → package/quantity → specifications → pricing → quality.
+- Use named helper functions instead of dense regex/condition blocks inside adapters.
+- Keep regex definitions named and close to the parser that owns their semantics.
+- Avoid excessive comments on trivial assignments; comments should provide a quick mental map and explain business meaning.
