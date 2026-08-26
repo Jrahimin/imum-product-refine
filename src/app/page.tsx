@@ -1,29 +1,28 @@
 import { loadArtifacts } from "@/lib/artifacts";
 import { Dashboard } from "./components/Dashboard";
-import { ExampleExplorer } from "./components/ExampleExplorer";
 
 export default async function Home() {
   const artifacts = await loadArtifacts();
   if (!artifacts) {
     return (
       <main className="page">
-        <h1>Product normalization ledger</h1>
-        <p>Run npm run normalize to generate dashboard artifacts.</p>
+        <header className="hero">
+          <p className="eyebrow">IMUM Test Day</p>
+          <h1>Product normalization ledger</h1>
+          <p className="lede-kicker">Normalize meaning, not numbers.</p>
+          <p className="lede">
+            The dashboard reads generated artifacts only. Run the pipeline to inspect real
+            normalized rows.
+          </p>
+          <ul className="stat-strip">
+            <li>
+              <code className="run-pill">Run: npm run normalize</code>
+            </li>
+          </ul>
+        </header>
       </main>
     );
   }
 
-  return (
-    <>
-      <Dashboard metrics={artifacts.metrics} />
-      <section className="page examples-section">
-        <h2>Raw → normalized → derived</h2>
-        <p className="note">
-          Representative cases from the generated artifacts. Evidence records why a value was
-          kept, converted, or left unset.
-        </p>
-        <ExampleExplorer groups={artifacts.examples} />
-      </section>
-    </>
-  );
+  return <Dashboard metrics={artifacts.metrics} examples={artifacts.examples} />;
 }

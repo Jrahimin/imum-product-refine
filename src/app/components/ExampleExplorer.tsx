@@ -3,16 +3,30 @@
 import { useMemo, useState } from "react";
 import type { ExampleGroup } from "../../lib/normalization/metrics";
 import type { NormalizedProduct } from "../../lib/normalization/types";
+import { formatMoney } from "./format";
+import {
+  derivedEquation,
+  explainWhy,
+  offerFacts,
+  rawIdentity,
+  shortExampleLabel,
+  specificationFacts,
+} from "./presentation";
+import { StatusBadge } from "./StatusBadge";
 
 /** Browse representative normalized products without loading the full corpus. */
 export function ExampleExplorer({ groups }: { groups: ExampleGroup[] }) {
   const [activeId, setActiveId] = useState(groups[0]?.id ?? "");
+  const [index, setIndex] = useState(0);
   const active = useMemo(
     () => groups.find((group) => group.id === activeId) ?? groups[0],
     [activeId, groups],
   );
 
   if (!active) return null;
+
+  const product = active.products[Math.min(index, active.products.length - 1)];
+  if (!product) return null;
 
   return (
     <div>
@@ -22,154 +36,138 @@ export function ExampleExplorer({ groups }: { groups: ExampleGroup[] }) {
             key={group.id}
             type="button"
             className={group.id === active.id ? "tab active" : "tab"}
-            onClick={() => setActiveId(group.id)}
+            onClick={() => {
+              setActiveId(group.id);
+              setIndex(0);
+            }}
           >
-            {group.source}: {group.label}
+            {shortExampleLabel(group)}
           </button>
         ))}
       </div>
-      <div className="example-list">
-        {active.products.map((product, index) => (
-          <ProductCard key={productKey(product, index)} product={product} />
-        ))}
-      </div>
+
+      {active.products.length > 1 ? (
+        <div className="example-pager">
+          <button
+            type="button"
+            className="pager-btn"
+            disabled={index <= 0}
+            onClick={() => setIndex((value) => Math.max(0, value - 1))}
+          >
+            Previous
+          </button>
+          <span>
+            {index + 1} of {active.products.length}
+          </span>
+          <button
+            type="button"
+            className="pager-btn"
+            disabled={index >= active.products.length - 1}
+            onClick={() => setIndex((value) => Math.min(active.products.length - 1, value + 1))}
+          >
+            Next
+          </button>
+        </div>
+      ) : null}
+
+      <ExampleCard groupLabel={shortExampleLabel(active)} product={product} />
     </div>
   );
 }
 
-/** Render one inspectable normalized product. */
-function ProductCard({ product }: { product: NormalizedProduct }) {
-  const unit = product.pricing.unitPriceUnit;
+/** One live-demo card: RAW, INTERPRETED, DERIVED, WHY, with evidence secondary. */
+function ExampleCard({
+  groupLabel,
+  product,
+}: {
+  groupLabel: string;
+  product: NormalizedProduct;
+}) {
+  const specs = specificationFacts(product);
+  const offer = offerFacts(product);
+  const identity = rawIdentity(product);
+
   return (
-    <article className="product-card">
-      <p className="product-kicker">
-        {product.identity.source}
-        {product.taxonomy.category ? ` · ${product.taxonomy.category}` : ""}
-      </p>
-      <h3>{product.identity.title}</h3>
-      <dl className="facts">
+    <article className="example-card">
+      <header className="example-head">
         <div>
-          <dt>Identity</dt>
-          <dd>
-            {[product.identity.brand, product.identity.manufacturer, product.identity.model]
-              .filter(Boolean)
-              .join(" · ") || "—"}
-            {product.identity.barcode ? ` · ${product.identity.barcode}` : ""}
-          </dd>
+          <p className="product-kicker">
+            {groupLabel} ({product.identity.source})
+            {product.taxonomy.category ? ` · ${product.taxonomy.category}` : ""}
+          </p>
         </div>
-        <div>
-          <dt>Offer</dt>
-          <dd>
-            {formatOffer(product)}
-            {` · denominator ${product.offer.denominatorStatus}`}
-          </dd>
+        <StatusBadge status={product.offer.denominatorStatus} />
+      </header>
+
+      <div className="example-block">
+        <p className="block-label">Raw</p>
+        <p className="example-title">{product.identity.title}</p>
+        <p className="example-raw-meta">
+          {formatMoney(product.pricing.comparablePrice)}
+          {product.pricing.comparablePriceField ? ` · ${product.pricing.comparablePriceField}` : ""}
+          {identity ? ` · ${identity}` : ""}
+        </p>
+      </div>
+
+      <div className="interpreted-grid">
+        <div className="example-block">
+          <p className="block-label">Interpreted · specification</p>
+          <FactList facts={specs} empty="No product-defining measurement on this row." />
         </div>
-        <div>
-          <dt>Specifications</dt>
-          <dd>{formatSpecs(product)}</dd>
+        <div className="example-block">
+          <p className="block-label">Interpreted · offer</p>
+          <FactList facts={offer} empty="No retail quantity — not a pricing denominator." />
         </div>
-        <div>
-          <dt>Pricing</dt>
-          <dd>
-            comparable {formatMoney(product.pricing.comparablePrice)} ({product.pricing.comparablePriceField ?? "none"})
-            {product.pricing.unitPrice != null
-              ? ` → ${formatMoney(product.pricing.unitPrice)} / ${unit}`
-              : " → no unit price"}
-            {product.pricing.memberPrice != null ? ` · member ${formatMoney(product.pricing.memberPrice)}` : ""}
-            {product.pricing.discountPrice != null ? ` · discount ${formatMoney(product.pricing.discountPrice)}` : ""}
-          </dd>
-        </div>
-      </dl>
-      {product.quality.warnings.length > 0 ? (
-        <ul className="warnings">
-          {product.quality.warnings.map((warning, index) => (
-            <li key={`${warning.code}-${index}`}>
-              <code>{warning.code}</code> {warning.message}
+      </div>
+
+      <div className="example-block derived-block">
+        <p className="block-label">Derived</p>
+        <p className="derived-equation">{derivedEquation(product)}</p>
+      </div>
+
+      <div className="example-block">
+        <p className="block-label">Why</p>
+        <p className="why-copy">{explainWhy(product)}</p>
+        {product.quality.warnings.length > 0 ? (
+          <ul className="warnings">
+            {product.quality.warnings.map((warning, warningIndex) => (
+              <li key={`${warning.code}-${warningIndex}`}>{warning.message}</li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+
+      <details className="evidence-details">
+        <summary>Evidence ({product.evidence.length})</summary>
+        <ul className="evidence">
+          {product.evidence.map((item, evidenceIndex) => (
+            <li key={`${item.field}-${item.origin}-${item.rule}-${evidenceIndex}`}>
+              <code>{item.field}</code> ← {item.origin}/{item.rule}: {item.raw}
             </li>
           ))}
         </ul>
-      ) : (
-        <p className="ok">No warnings</p>
-      )}
-      <ul className="evidence">
-        {product.evidence.map((item, index) => (
-          <li key={`${item.field}-${item.origin}-${item.rule}-${index}`}>
-            <code>{item.field}</code> ← {item.origin}/{item.rule}: {item.raw}
-          </li>
-        ))}
-      </ul>
+      </details>
     </article>
   );
 }
 
-/** Summarize package count and purchasable quantity. */
-function formatOffer(product: NormalizedProduct): string {
-  const parts: string[] = [];
-  if (product.offer.packageCount != null) parts.push(`${product.offer.packageCount} pcs`);
-  if (product.offer.itemQuantity) {
-    parts.push(`item ${product.offer.itemQuantity.value} ${product.offer.itemQuantity.unit}`);
-  }
-  if (product.offer.totalQuantity) {
-    parts.push(`total ${product.offer.totalQuantity.value} ${product.offer.totalQuantity.unit}`);
-  }
-  return parts.join(" · ") || "no offer quantity";
-}
-
-const PRIORITY_EXTRA_KEYS = [
-  "productCode",
-  "internalProductCode",
-  "inStock",
-  "url",
-  "activeSubstanceStrengthRaw",
-  "form",
-  "activeSubstance",
-  "amountInPackageRaw",
-  "quantityRaw",
-] as const;
-
-/** Stable React key that still works when source_id/record_id repeat or are missing. */
-function productKey(product: NormalizedProduct, index: number): string {
-  const identity = [
-    product.identity.source,
-    product.identity.countryCode,
-    product.identity.sourceId,
-    product.identity.recordId,
-  ]
-    .filter((part) => part != null && part !== "")
-    .join("|");
-  return identity ? `${identity}|${index}` : `row-${index}`;
-}
-
-/** Summarize dimensions, strength, and preserved extra fields that explain the row. */
-function formatSpecs(product: NormalizedProduct): string {
-  const parts: string[] = [];
-  if (product.specifications.dimensions) {
-    parts.push(
-      `${product.specifications.dimensions.values.join(" × ")} ${product.specifications.dimensions.unit}`,
-    );
-  }
-  if (product.specifications.strength) {
-    parts.push(`${product.specifications.strength.value} ${product.specifications.strength.unit}`);
-  }
-
-  const extra = product.specifications.extra;
-  const shown = new Set<string>();
-  for (const key of PRIORITY_EXTRA_KEYS) {
-    const value = extra[key];
-    if (!value) continue;
-    parts.push(`${key}=${value}`);
-    shown.add(key);
-  }
-  const remaining = Object.entries(extra)
-    .filter(([key]) => !shown.has(key))
-    .slice(0, 4)
-    .map(([key, value]) => `${key}=${value}`);
-  parts.push(...remaining);
-  return parts.join(" · ") || "—";
-}
-
-/** Format a euro amount without locale APIs. */
-function formatMoney(value: number | null): string {
-  if (value == null) return "—";
-  return `€${value.toFixed(4).replace(/\.?0+$/, "")}`;
+/** Render labeled specification or offer facts. */
+function FactList({
+  facts,
+  empty,
+}: {
+  facts: { label: string; value: string }[];
+  empty: string;
+}) {
+  if (facts.length === 0) return <p className="fact-empty">{empty}</p>;
+  return (
+    <dl className="fact-list">
+      {facts.map((fact) => (
+        <div key={`${fact.label}-${fact.value}`}>
+          <dt>{fact.label}</dt>
+          <dd>{fact.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
 }
