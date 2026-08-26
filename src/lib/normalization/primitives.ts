@@ -201,8 +201,8 @@ export type StructuredPackResult = {
 
 /**
  * Apply a structured pack count over a title-derived offer.
- * Recompute total only when it was a clean item × title-count product.
- * Independent totals (box area, standalone volume) are kept; stale derived totals are cleared.
+ * The structured count always wins. A disagreement blocks unit price rather than
+ * recomputing a new total from the disputed pack size.
  */
 export function reconcileStructuredPackageCount(
   current: {
@@ -216,17 +216,14 @@ export function reconcileStructuredPackageCount(
   const mismatched = current.packageCount != null && current.packageCount !== structuredCount;
   let itemQuantity = current.itemQuantity;
   let totalQuantity = current.totalQuantity;
-  let blockUnitPrice = false;
 
   if (mismatched) {
-    if (totalDerivedFromItemCount(itemQuantity, current.packageCount, totalQuantity) && itemQuantity) {
-      // Per-item size does not depend on how many the retailer packed.
-      totalQuantity = multiplyQuantity(itemQuantity, structuredCount);
-    } else if (totalQuantity && itemQuantity && current.packageCount != null) {
-      // Both layers exist but they are not a safe item × count product, so unit price would lie.
+    if (totalDerivedFromItemCount(itemQuantity, current.packageCount, totalQuantity)) {
+      // Per-item size can stay; the × title-count total belongs to the disagreed pack.
+      totalQuantity = null;
+    } else if (totalQuantity && itemQuantity) {
       itemQuantity = null;
       totalQuantity = null;
-      blockUnitPrice = true;
     }
   }
 
@@ -235,7 +232,7 @@ export function reconcileStructuredPackageCount(
     packageCountRaw: structuredRaw,
     itemQuantity,
     totalQuantity,
-    blockUnitPrice,
+    blockUnitPrice: mismatched,
     mismatched,
   };
 }

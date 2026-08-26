@@ -441,7 +441,7 @@ describe("pricing policy", () => {
 });
 
 describe("SNK, TOP, and BNU adapters", () => {
-  it("prefers SNK structured pack count and records title disagreement", () => {
+  it("prefers SNK structured pack count, records disagreement, and blocks unit price", () => {
     const product = normalizeRow("SNK", {
       title: "Kaištis 12 vnt.",
       brand: "Fischer",
@@ -458,11 +458,13 @@ describe("SNK, TOP, and BNU adapters", () => {
       meta: JSON.stringify({ extra: { "Vienetai pakuotėje": "8" } }),
     });
     assert.equal(product.offer.packageCount, 8);
+    assert.equal(product.pricing.unitPrice, null);
+    assert.equal(product.offer.denominatorStatus, "unavailable");
     assert.ok(product.quality.warnings.some((item) => item.code === "title_meta_package_mismatch"));
     assert.ok(product.evidence.some((item) => item.rule === "structured_package_count"));
   });
 
-  it("recomputes a title-derived total when a structured pack count overrides a composite", () => {
+  it("keeps structured pack count and blocks unit price when it disagrees with a title composite", () => {
     const product = normalizeRow("SNK", {
       title: "PENOSIL 750 ml x 12 vnt.",
       final_price: "36",
@@ -470,8 +472,8 @@ describe("SNK, TOP, and BNU adapters", () => {
     });
     assert.equal(product.offer.packageCount, 8);
     assert.equal(product.offer.itemQuantity?.value, 0.75);
-    assert.equal(product.offer.totalQuantity?.value, 6);
-    assert.equal(product.pricing.unitPrice, 6);
+    assert.equal(product.offer.totalQuantity, null);
+    assert.equal(product.pricing.unitPrice, null);
     assert.ok(product.quality.warnings.some((item) => item.code === "title_meta_package_mismatch"));
   });
 
@@ -492,12 +494,13 @@ describe("SNK, TOP, and BNU adapters", () => {
     assert.equal(result.packageCount, 8);
   });
 
-  it("uses SNK Kiekis pakuotėje, kg as contents and ignores generic Svoris", () => {
+  it("maps SNK Kiekis pakuotėje to totalQuantity and ignores generic Svoris", () => {
     const cement = normalizeRow("SNK", {
       title: "Pilkas cementas Rocket M800, 42.5 R, 35 kg",
       final_price: "7",
       meta: JSON.stringify({ extra: { "Kiekis pakuotėje, kg": "35" } }),
     });
+    assert.equal(cement.offer.itemQuantity, null);
     assert.equal(cement.offer.totalQuantity?.value, 35);
     assert.equal(cement.offer.totalQuantity?.unit, "kg");
     assert.equal(cement.pricing.unitPriceUnit, "kg");
@@ -512,14 +515,48 @@ describe("SNK, TOP, and BNU adapters", () => {
     assert.equal(glue.pricing.unitPrice, null);
   });
 
-  it("uses generic SNK Tūris only with title agreement and non-capacity context", () => {
+  it("does not let SNK structured or generic volume overwrite a title composite", () => {
+    const agreeing = normalizeRow("SNK", {
+      title: "PENOSIL 750 ml x 12 vnt.",
+      final_price: "36",
+      meta: JSON.stringify({ extra: { "Kiekis pakuotėje, l": "9" } }),
+    });
+    assert.equal(agreeing.offer.packageCount, 12);
+    assert.equal(agreeing.offer.itemQuantity?.value, 0.75);
+    assert.equal(agreeing.offer.totalQuantity?.value, 9);
+    assert.equal(agreeing.pricing.unitPrice, 4);
+
+    const disagreeing = normalizeRow("SNK", {
+      title: "PENOSIL 750 ml x 12 vnt.",
+      final_price: "36",
+      meta: JSON.stringify({ extra: { "Kiekis pakuotėje, l": "0.75", Tūris: "0.75 l" } }),
+    });
+    assert.equal(disagreeing.offer.itemQuantity?.value, 0.75);
+    assert.equal(disagreeing.offer.totalQuantity?.value, 9);
+    assert.equal(disagreeing.pricing.unitPrice, null);
+    assert.equal(disagreeing.specifications.extra.packageQuantityRaw, "0.75");
+    assert.equal(disagreeing.specifications.extra.volumeRaw, "0.75 l");
+  });
+
+  it("uses generic SNK Tūris only as a single-product quantity", () => {
     const cleaner = normalizeRow("SNK", {
       title: "Kilimų valiklis 1.5 l",
       final_price: "15",
       meta: JSON.stringify({ extra: { "Tūris": "1.5 l" } }),
     });
+    assert.equal(cleaner.offer.itemQuantity?.value, 1.5);
     assert.equal(cleaner.offer.totalQuantity?.value, 1.5);
     assert.equal(cleaner.pricing.unitPriceUnit, "L");
+
+    const packed = normalizeRow("SNK", {
+      title: "Kilimų valiklis 1.5 l, 12 vnt.",
+      final_price: "15",
+      meta: JSON.stringify({ extra: { "Tūris": "1.5 l" } }),
+    });
+    assert.equal(packed.offer.packageCount, 12);
+    assert.equal(packed.offer.totalQuantity, null);
+    assert.equal(packed.pricing.unitPriceUnit, "piece");
+    assert.equal(packed.specifications.extra.volumeRaw, "1.5 l");
 
     const bucket = normalizeRow("SNK", {
       title: "Grindų plovimo kibiras 10 l",
@@ -620,6 +657,18 @@ describe("SNK, TOP, and BNU adapters", () => {
     });
     assert.equal(bundle.offer.denominatorStatus, "blocked_bundle");
     assert.equal(bundle.pricing.unitPrice, null);
+  });
+
+  it("blocks BNU unit price when amount_in_package disagrees with the title pack", () => {
+    const product = normalizeRow("BNU", {
+      title: "Paracetamol 500 mg N20",
+      amount_in_package: "24",
+      final_price: "2.00",
+    });
+    assert.equal(product.offer.packageCount, 24);
+    assert.equal(product.pricing.unitPrice, null);
+    assert.equal(product.offer.denominatorStatus, "unavailable");
+    assert.ok(product.quality.warnings.some((item) => item.code === "title_n_vs_amount_mismatch"));
   });
 });
 

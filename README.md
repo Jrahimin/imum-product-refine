@@ -60,7 +60,7 @@ npm run lint
 - Titles with multiple composite contents or multiple/ranged dimensions stay unset and emit an ambiguity warning.
 - Volume or mass beside a pack count is used only when the relationship is explicit (`750 ml x 12 vnt.`, `750ml (12 vnt)`). Bare `4 x 100 g` needs source/category evidence that it is a contents pack, not a bowl or container capacity.
 - `rinkinys` / `komplektas` titles do not get €/piece unless the set is a homogeneous identical-item composite.
-- Generic SNK `Tūris` becomes an offer quantity only when the title agrees and does not describe container capacity. SNK mass uses `Kiekis pakuotėje, kg` only, not generic `Svoris` or standalone title grams.
+- Generic SNK `Tūris` is a single-product quantity only when the title agrees, the product is not a container, and no pack/composite is competing. `Kiekis pakuotėje, l/kg` is the package total. A title composite such as `750 ml x 12 vnt.` is not overwritten by structured volume.
 - A `+` character is not a bundle; an extra item such as `+ pistoletas` blocks unit-price comparison.
 - BNU `amount_in_package` is mapped to package count only when it is a clean integer; compound strength remains in the raw specification map.
 - TOP titles usually have no retail quantity; identity is still useful.

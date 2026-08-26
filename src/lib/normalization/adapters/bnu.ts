@@ -127,6 +127,7 @@ export const bnuAdapter: SourceAdapter = {
         code: "title_n_vs_amount_mismatch",
         message: `Title N=${titleN[0].count} disagrees with amount_in_package=${structuredCount}.`,
       });
+      blockUnitPrice = true;
     }
 
     const structuredStrength = parseStrengthFromText(strengthRaw);

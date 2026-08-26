@@ -7,7 +7,7 @@ import {
   parseQuantityFromText,
   reconcileStructuredPackageCount,
 } from "../primitives";
-import type { Quantity } from "../types";
+import type { EvidenceItem, Quantity } from "../types";
 import type { AdapterDraft, SourceAdapter } from "./types";
 import { copyNativeFields, text } from "./types";
 
@@ -20,6 +20,21 @@ function titleSupportsGenericVolume(title: string, volume: Quantity): boolean {
   }
   const titleQuantity = parseQuantityFromText(title);
   return titleQuantity?.unit === volume.unit && titleQuantity.value === volume.value;
+}
+
+/** True when the title already named an identical-item composite pack. */
+function titleHasExplicitComposite(evidence: EvidenceItem[]): boolean {
+  return evidence.some(
+    (item) =>
+      item.rule === "quantity_x_count" ||
+      item.rule === "quantity_paren_count" ||
+      item.rule === "count_x_quantity",
+  );
+}
+
+/** True when two quantities are the same canonical amount. */
+function quantitiesEqual(left: Quantity | null, right: Quantity): boolean {
+  return left != null && left.unit === right.unit && left.kind === right.kind && left.value === right.value;
 }
 
 /** Map SNK using structured extra fields first, then high-confidence title fallback. */
@@ -82,9 +97,7 @@ export const snkAdapter: SourceAdapter = {
     const trustedGenericVolume =
       genericVolume && titleSupportsGenericVolume(title, genericVolume) ? genericVolume : null;
     // Package liters win over kg when both exist; generic Svoris is product weight, not contents.
-    const volume = packageLiters ?? trustedGenericVolume;
-    const mass = volume ? null : packageKg;
-    if (genericVolumeRaw && !trustedGenericVolume) extra.volumeRaw = genericVolumeRaw;
+    const packageContents = packageLiters ?? packageKg;
 
     const warnings = [...titleOffer.warnings];
     const evidence = [...titleOffer.evidence];
@@ -123,18 +136,50 @@ export const snkAdapter: SourceAdapter = {
       });
     }
 
-    const contents = volume ?? mass;
-    if (contents) {
-      // These SNK keys describe package contents, not per-item size × pack count.
-      itemQuantity = contents;
-      totalQuantity = contents;
-      blockUnitPrice = false;
+    const composite = titleHasExplicitComposite(titleOffer.evidence);
+    if (packageContents) {
+      if (composite || (totalQuantity && !quantitiesEqual(totalQuantity, packageContents))) {
+        if (quantitiesEqual(totalQuantity, packageContents)) {
+          evidence.push({
+            field: "totalQuantity",
+            raw: packageContents.raw,
+            origin: "meta",
+            rule: packageContents.kind === "mass" ? "structured_mass" : "structured_volume",
+          });
+        } else {
+          // Title already named the pack contents; a disagreeing structured quantity is kept raw.
+          extra.packageQuantityRaw = packageContents.raw;
+          blockUnitPrice = true;
+        }
+      } else {
+        // Kiekis pakuotėje is the purchasable package total, not a per-item size.
+        totalQuantity = packageContents;
+        evidence.push({
+          field: "totalQuantity",
+          raw: packageContents.raw,
+          origin: "meta",
+          rule: packageContents.kind === "mass" ? "structured_mass" : "structured_volume",
+        });
+      }
+    }
+
+    const usedGenericVolume =
+      !packageContents &&
+      trustedGenericVolume != null &&
+      !composite &&
+      (packageCount == null || packageCount === 1);
+    if (usedGenericVolume && trustedGenericVolume) {
+      // Generic Tūris is a single-product size only when no pack/composite is competing.
+      itemQuantity = trustedGenericVolume;
+      totalQuantity = trustedGenericVolume;
       evidence.push({
         field: "itemQuantity",
-        raw: contents.raw,
+        raw: trustedGenericVolume.raw,
         origin: "meta",
-        rule: contents.kind === "mass" ? "structured_mass" : "structured_volume",
+        rule: "structured_volume",
       });
+    } else if (genericVolumeRaw && !usedGenericVolume) {
+      extra.volumeRaw = genericVolumeRaw;
     }
 
     if (identity.brand) evidence.push({ field: "brand", raw: identity.brand, origin: "column", rule: "identity_column" });
