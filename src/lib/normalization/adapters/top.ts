@@ -1,7 +1,7 @@
 import type { CsvRow } from "../../csv";
 import { emptyToNull, extractTitleOffer, parseDimensions, parseJsonObject } from "../primitives";
 import type { AdapterDraft, SourceAdapter } from "./types";
-import { text } from "./types";
+import { copyNativeFields, text } from "./types";
 
 const SPEC_COLUMNS = ["length", "width", "height", "depth", "weight", "power", "color", "dimensions"] as const;
 
@@ -36,6 +36,7 @@ export const topAdapter: SourceAdapter = {
       allowStandaloneVolume: false,
       allowStandaloneMass: false,
       allowPharmacyN: false,
+      allowBareCountXQuantity: false,
     });
 
     const extra: Record<string, string> = {};
@@ -43,6 +44,7 @@ export const topAdapter: SourceAdapter = {
       const value = text(row, field);
       if (value) extra[field] = value;
     }
+    copyNativeFields(row, extra);
 
     const meta = parseJsonObject(row.meta);
     if (meta) {
@@ -69,6 +71,8 @@ export const topAdapter: SourceAdapter = {
         itemQuantity: titleOffer.itemQuantity,
         totalQuantity: titleOffer.totalQuantity,
         bundleBlocked: titleOffer.bundleBlocked,
+        blockUnitPrice: false,
+        blockPieceUnitPrice: titleOffer.mixedSetBlocked,
       },
       specifications: {
         dimensions: titleOffer.dimensions ?? columnDimensions,

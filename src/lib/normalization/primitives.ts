@@ -10,11 +10,22 @@ import type {
 
 const NUMBER_TOKEN = String.raw`(\d+(?:[.,]\d+)?)`;
 
-/** Explicit count × quantity, e.g. `4 x 100 g` or `2 x 185 ml`. */
+/**
+ * Bare count × quantity, e.g. `4 x 100 g`.
+ * Not globally safe: bowls (`2 x 550 ml`) and metal profiles (`40 x 40 x 2 L`) also match.
+ * The lookbehind avoids taking the last two parts of an `N x N x N` triple.
+ */
 const COUNT_X_QUANTITY_RE = new RegExp(
-  String.raw`\b(\d+)\s*[x×]\s*${NUMBER_TOKEN}\s*(ml|l|kg|g)\b`,
+  String.raw`(?<![x×]\s*)\b(\d+)\s*[x×]\s*${NUMBER_TOKEN}\s*(ml|l|kg|g)\b`,
   "i",
 );
+
+/** Container/capacity wording: the number is a vessel size, not package contents. */
+const CAPACITY_OR_CONTAINER_RE =
+  /\b(?:duben|indel|indas|talp(?:a|os)|kibir|vonel|daiktadėž|prieskonin|šaldymo element|svarmen)\b/i;
+
+/** Named mixed sets. A lone vnt count is not a homogeneous identical-item pack. */
+const NAMED_SET_RE = /\b(?:rinkinys|komplektas)\b/i;
 
 /** Explicit quantity × count, e.g. `750 ml x 12 vnt.` or `0.085 kg x 12 vnt.`. */
 const QUANTITY_X_COUNT_RE = new RegExp(
@@ -67,6 +78,8 @@ export type TitleOfferOptions = {
   allowStandaloneVolume: boolean;
   allowStandaloneMass: boolean;
   allowPharmacyN: boolean;
+  /** Opt-in only: adapters must have source/category evidence that this is a contents pack. */
+  allowBareCountXQuantity: boolean;
 };
 
 export type TitleExtraction = {
@@ -77,6 +90,7 @@ export type TitleExtraction = {
   dimensions: Dimensions | null;
   strength: Strength | null;
   bundleBlocked: boolean;
+  mixedSetBlocked: boolean;
   warnings: QualityIssue[];
   evidence: EvidenceItem[];
 };
@@ -165,6 +179,67 @@ export function multiplyQuantity(item: Quantity, count: number): Quantity | null
   };
 }
 
+/** True when total is exactly the per-item quantity times the title pack count. */
+function totalDerivedFromItemCount(
+  item: Quantity | null,
+  count: number | null,
+  total: Quantity | null,
+): boolean {
+  if (!item || count == null || count <= 0 || !total) return false;
+  if (item.unit !== total.unit || item.kind !== total.kind) return false;
+  return total.value === roundQuantity(item.value * count);
+}
+
+export type StructuredPackResult = {
+  packageCount: number;
+  packageCountRaw: string;
+  itemQuantity: Quantity | null;
+  totalQuantity: Quantity | null;
+  blockUnitPrice: boolean;
+  mismatched: boolean;
+};
+
+/**
+ * Apply a structured pack count over a title-derived offer.
+ * Recompute total only when it was a clean item × title-count product.
+ * Independent totals (box area, standalone volume) are kept; stale derived totals are cleared.
+ */
+export function reconcileStructuredPackageCount(
+  current: {
+    packageCount: number | null;
+    itemQuantity: Quantity | null;
+    totalQuantity: Quantity | null;
+  },
+  structuredCount: number,
+  structuredRaw: string,
+): StructuredPackResult {
+  const mismatched = current.packageCount != null && current.packageCount !== structuredCount;
+  let itemQuantity = current.itemQuantity;
+  let totalQuantity = current.totalQuantity;
+  let blockUnitPrice = false;
+
+  if (mismatched) {
+    if (totalDerivedFromItemCount(itemQuantity, current.packageCount, totalQuantity) && itemQuantity) {
+      // Per-item size does not depend on how many the retailer packed.
+      totalQuantity = multiplyQuantity(itemQuantity, structuredCount);
+    } else if (totalQuantity && itemQuantity && current.packageCount != null) {
+      // Both layers exist but they are not a safe item × count product, so unit price would lie.
+      itemQuantity = null;
+      totalQuantity = null;
+      blockUnitPrice = true;
+    }
+  }
+
+  return {
+    packageCount: structuredCount,
+    packageCountRaw: structuredRaw,
+    itemQuantity,
+    totalQuantity,
+    blockUnitPrice,
+    mismatched,
+  };
+}
+
 /** Append compact provenance for one extracted value. */
 function pushEvidence(
   evidence: EvidenceItem[],
@@ -186,6 +261,16 @@ function warn(warnings: QualityIssue[], code: string, message: string): void {
 export function hasExtraItemBundle(title: string): boolean {
   // `50+ N100` and `6m+ N2` are age markers; a pharmacy bundle starts with an N-count.
   return EXTRA_ACCESSORY_PLUS_RE.test(title) || EXTRA_PHARMACY_PACK_RE.test(title);
+}
+
+/** True when a bare `N x quantity` is naming a vessel or appliance capacity. */
+function isCapacityOrContainerContext(title: string): boolean {
+  return CAPACITY_OR_CONTAINER_RE.test(title);
+}
+
+/** True when the title names a set rather than a pack of identical items. */
+export function isNamedSetTitle(title: string): boolean {
+  return NAMED_SET_RE.test(title);
 }
 
 /** Collect distinct explicit piece counts from vnt/pcs/gab tokens. */
@@ -292,17 +377,19 @@ function isCompoundSpecification(title: string, quantity: Quantity): boolean {
 export function extractTitleOffer(title: string, options: TitleOfferOptions): TitleExtraction {
   const warnings: QualityIssue[] = [];
   const evidence: EvidenceItem[] = [];
-  // komplektas/rinkinys is a set and may still have a valid piece count.
   const extraItemBundle = hasExtraItemBundle(title);
 
   let packageCount: number | null = null;
   let packageCountRaw: string | null = null;
   let itemQuantity: Quantity | null = null;
   let totalQuantity: Quantity | null = null;
+  let homogeneousComposite = false;
 
   const composites = [
     ...compositeMatches(QUANTITY_X_COUNT_RE, "quantity_x_count", { countIndex: 3, valueIndex: 1, unitIndex: 2 }),
-    ...compositeMatches(COUNT_X_QUANTITY_RE, "count_x_quantity", { countIndex: 1, valueIndex: 2, unitIndex: 3 }),
+    ...(options.allowBareCountXQuantity && !isCapacityOrContainerContext(title)
+      ? compositeMatches(COUNT_X_QUANTITY_RE, "count_x_quantity", { countIndex: 1, valueIndex: 2, unitIndex: 3 })
+      : []),
     ...compositeMatches(QUANTITY_PAREN_COUNT_RE, "quantity_paren_count", {
       countIndex: 3,
       valueIndex: 1,
@@ -343,6 +430,7 @@ export function extractTitleOffer(title: string, options: TitleOfferOptions): Ti
     packageCount = count;
     packageCountRaw = match[0].trim();
     totalQuantity = multiplyQuantity(item, count);
+    homogeneousComposite = true;
     pushEvidence(evidence, "itemQuantity", match[0].trim(), "title", rule);
     pushEvidence(evidence, "packageCount", match[0].trim(), "title", rule);
   }
@@ -442,6 +530,16 @@ export function extractTitleOffer(title: string, options: TitleOfferOptions): Ti
     pushEvidence(evidence, "strength", strength.raw, "title", "strength_mg");
   }
 
+  // A named set with only a vnt count is not a pack of identical pieces; composites of the same item still are.
+  const mixedSetBlocked = isNamedSetTitle(title) && !homogeneousComposite;
+  if (mixedSetBlocked && packageCount != null) {
+    warn(
+      warnings,
+      "mixed_item_set",
+      "Title names a rinkinys/komplektas without a homogeneous identical-item quantity, so piece unit price is not derived.",
+    );
+  }
+
   return {
     packageCount,
     packageCountRaw,
@@ -450,6 +548,7 @@ export function extractTitleOffer(title: string, options: TitleOfferOptions): Ti
     dimensions,
     strength,
     bundleBlocked: extraItemBundle,
+    mixedSetBlocked,
     warnings,
     evidence,
   };

@@ -6,9 +6,10 @@ import {
   parsePharmacyNCounts,
   parseQuantityFromText,
   parseStrengthFromText,
+  reconcileStructuredPackageCount,
 } from "../primitives";
 import type { AdapterDraft, SourceAdapter } from "./types";
-import { text } from "./types";
+import { copyNativeFields, text } from "./types";
 
 /** Map BNU pharmacy fields onto the common model without treating mg as a pack. */
 export const bnuAdapter: SourceAdapter = {
@@ -41,6 +42,7 @@ export const bnuAdapter: SourceAdapter = {
       allowStandaloneVolume: false,
       allowStandaloneMass: false,
       allowPharmacyN: false,
+      allowBareCountXQuantity: false,
     });
 
     const extra: Record<string, string> = {};
@@ -54,6 +56,7 @@ export const bnuAdapter: SourceAdapter = {
     if (strengthRaw) extra.activeSubstanceStrengthRaw = strengthRaw;
     if (amountRaw) extra.amountInPackageRaw = amountRaw;
     if (quantityRaw) extra.quantityRaw = quantityRaw;
+    copyNativeFields(row, extra);
 
     const warnings = [...titleOffer.warnings];
     const evidence = [...titleOffer.evidence];
@@ -61,10 +64,31 @@ export const bnuAdapter: SourceAdapter = {
     const structuredCount = isDiscretePackageCount(amountRaw);
     let packageCount = titleOffer.packageCount;
     let packageCountRaw = titleOffer.packageCountRaw;
+    let itemQuantity = titleOffer.itemQuantity;
+    let totalQuantity = titleOffer.totalQuantity;
+    let blockUnitPrice = false;
 
     if (structuredCount != null && amountRaw) {
-      packageCount = structuredCount;
-      packageCountRaw = amountRaw;
+      const reconciled = reconcileStructuredPackageCount(
+        {
+          packageCount: titleOffer.packageCount,
+          itemQuantity: titleOffer.itemQuantity,
+          totalQuantity: titleOffer.totalQuantity,
+        },
+        structuredCount,
+        amountRaw,
+      );
+      packageCount = reconciled.packageCount;
+      packageCountRaw = reconciled.packageCountRaw;
+      itemQuantity = reconciled.itemQuantity;
+      totalQuantity = reconciled.totalQuantity;
+      blockUnitPrice = reconciled.blockUnitPrice;
+      if (reconciled.mismatched) {
+        warnings.push({
+          code: "title_n_vs_amount_mismatch",
+          message: `Title pack ${titleOffer.packageCount} disagrees with amount_in_package=${structuredCount}.`,
+        });
+      }
       evidence.push({
         field: "packageCount",
         raw: amountRaw,
@@ -125,8 +149,6 @@ export const bnuAdapter: SourceAdapter = {
     }
 
     const itemFromQuantity = parseQuantityFromText(quantityRaw);
-    let itemQuantity = titleOffer.itemQuantity;
-    let totalQuantity = titleOffer.totalQuantity;
     if (itemFromQuantity && (packageCount == null || packageCount === 1) && !itemQuantity) {
       // Use structured quantity as the offer size only when it is not competing with a multi-item pack.
       itemQuantity = itemFromQuantity;
@@ -160,6 +182,8 @@ export const bnuAdapter: SourceAdapter = {
         itemQuantity,
         totalQuantity,
         bundleBlocked: titleOffer.bundleBlocked,
+        blockUnitPrice,
+        blockPieceUnitPrice: titleOffer.mixedSetBlocked,
       },
       specifications: {
         dimensions: titleOffer.dimensions,

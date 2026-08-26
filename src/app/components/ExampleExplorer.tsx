@@ -116,6 +116,10 @@ function formatOffer(product: NormalizedProduct): string {
 }
 
 const PRIORITY_EXTRA_KEYS = [
+  "productCode",
+  "internalProductCode",
+  "inStock",
+  "url",
   "activeSubstanceStrengthRaw",
   "form",
   "activeSubstance",

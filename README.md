@@ -22,7 +22,7 @@ Each row becomes one `NormalizedProduct`:
 - `quality` — warnings only (missing denominators are not warnings)
 - `evidence` — compact provenance for derived values
 
-`source_id` is not globally unique. Duplicate-row checks use `source + country_code` plus every available `source_id`/`record_id`, and never drop rows.
+`source_id` is not globally unique. Duplicate metrics count exact repeated records (`source + country_code + source_id + record_id`) separately from reused `source_id` values within a source/market, and never drop rows.
 
 ## Pricing policy
 
@@ -58,8 +58,9 @@ npm run lint
 
 - Titles with two different pack counts (for example door-frame kits) stay unset.
 - Titles with multiple composite contents or multiple/ranged dimensions stay unset and emit an ambiguity warning.
-- Volume or mass beside a pack count is used only when the relationship is explicit (`750 ml x 12 vnt.`, `4 x 100 g`, `750ml (12 vnt)`).
-- Generic SNK `Tūris` becomes an offer quantity only when the title agrees and does not describe container capacity.
+- Volume or mass beside a pack count is used only when the relationship is explicit (`750 ml x 12 vnt.`, `750ml (12 vnt)`). Bare `4 x 100 g` needs source/category evidence that it is a contents pack, not a bowl or container capacity.
+- `rinkinys` / `komplektas` titles do not get €/piece unless the set is a homogeneous identical-item composite.
+- Generic SNK `Tūris` becomes an offer quantity only when the title agrees and does not describe container capacity. SNK mass uses `Kiekis pakuotėje, kg` only, not generic `Svoris` or standalone title grams.
 - A `+` character is not a bundle; an extra item such as `+ pistoletas` blocks unit-price comparison.
 - BNU `amount_in_package` is mapped to package count only when it is a clean integer; compound strength remains in the raw specification map.
 - TOP titles usually have no retail quantity; identity is still useful.

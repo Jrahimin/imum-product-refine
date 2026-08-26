@@ -84,10 +84,15 @@ export function resolveDenominatorStatus(input: {
   packageCount: number | null;
   totalQuantity: Offer["totalQuantity"];
   itemQuantity: Offer["itemQuantity"];
+  blockUnitPrice?: boolean;
+  blockPieceUnitPrice?: boolean;
 }): Offer["denominatorStatus"] {
   if (input.bundleBlocked) return "blocked_bundle";
-  if (input.totalQuantity || (input.packageCount != null && input.packageCount > 0)) {
-    return "available";
+  if (input.blockUnitPrice) return "unavailable";
+  if (input.totalQuantity) return "available";
+  if (input.packageCount != null && input.packageCount > 0) {
+    // A rinkinys/komplektas can still expose its piece count without becoming €/piece.
+    return input.blockPieceUnitPrice ? "unavailable" : "available";
   }
   // Many products are sold as a single unmeasured item. That is expected, not a warning.
   if (!input.itemQuantity) return "not_applicable";

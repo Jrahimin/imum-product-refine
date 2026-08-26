@@ -5,10 +5,11 @@ import {
   isDiscretePackageCount,
   metaExtraValue,
   parseQuantityFromText,
+  reconcileStructuredPackageCount,
 } from "../primitives";
 import type { Quantity } from "../types";
 import type { AdapterDraft, SourceAdapter } from "./types";
-import { text } from "./types";
+import { copyNativeFields, text } from "./types";
 
 const SPEC_COLUMNS = ["length", "width", "height", "depth", "weight", "power", "color", "dimensions"] as const;
 
@@ -52,6 +53,7 @@ export const snkAdapter: SourceAdapter = {
       allowStandaloneVolume: false,
       allowStandaloneMass: false,
       allowPharmacyN: false,
+      allowBareCountXQuantity: false,
     });
 
     const extra: Record<string, string> = {};
@@ -59,6 +61,7 @@ export const snkAdapter: SourceAdapter = {
       const value = text(row, field);
       if (value) extra[field] = value;
     }
+    copyNativeFields(row, extra);
     const productType = metaExtraValue(row.meta, "Prekės tipas");
     if (productType) extra.productType = productType;
 
@@ -70,10 +73,17 @@ export const snkAdapter: SourceAdapter = {
       unit: "L",
       kind: "volume",
     });
+    const packageKgRaw = metaExtraValue(row.meta, "Kiekis pakuotėje, kg");
+    const packageKg = parseQuantityFromText(packageKgRaw, {
+      unit: "kg",
+      kind: "mass",
+    });
     const genericVolume = parseQuantityFromText(genericVolumeRaw);
     const trustedGenericVolume =
       genericVolume && titleSupportsGenericVolume(title, genericVolume) ? genericVolume : null;
+    // Package liters win over kg when both exist; generic Svoris is product weight, not contents.
     const volume = packageLiters ?? trustedGenericVolume;
+    const mass = volume ? null : packageKg;
     if (genericVolumeRaw && !trustedGenericVolume) extra.volumeRaw = genericVolumeRaw;
 
     const warnings = [...titleOffer.warnings];
@@ -81,16 +91,30 @@ export const snkAdapter: SourceAdapter = {
 
     let packageCount = titleOffer.packageCount;
     let packageCountRaw = titleOffer.packageCountRaw;
+    let itemQuantity = titleOffer.itemQuantity;
+    let totalQuantity = titleOffer.totalQuantity;
+    let blockUnitPrice = false;
     if (structuredPack != null && structuredPackRaw) {
-      // Structured pack count wins over the title when both exist.
-      if (titleOffer.packageCount != null && titleOffer.packageCount !== structuredPack) {
+      const reconciled = reconcileStructuredPackageCount(
+        {
+          packageCount: titleOffer.packageCount,
+          itemQuantity: titleOffer.itemQuantity,
+          totalQuantity: titleOffer.totalQuantity,
+        },
+        structuredPack,
+        structuredPackRaw,
+      );
+      if (reconciled.mismatched) {
         warnings.push({
           code: "title_meta_package_mismatch",
           message: `Title pack ${titleOffer.packageCount} disagrees with Vienetai pakuotėje ${structuredPack}.`,
         });
       }
-      packageCount = structuredPack;
-      packageCountRaw = structuredPackRaw;
+      packageCount = reconciled.packageCount;
+      packageCountRaw = reconciled.packageCountRaw;
+      itemQuantity = reconciled.itemQuantity;
+      totalQuantity = reconciled.totalQuantity;
+      blockUnitPrice = reconciled.blockUnitPrice;
       evidence.push({
         field: "packageCount",
         raw: structuredPackRaw,
@@ -99,13 +123,18 @@ export const snkAdapter: SourceAdapter = {
       });
     }
 
-    let itemQuantity = titleOffer.itemQuantity;
-    let totalQuantity = titleOffer.totalQuantity;
-    if (volume) {
+    const contents = volume ?? mass;
+    if (contents) {
       // These SNK keys describe package contents, not per-item size × pack count.
-      itemQuantity = volume;
-      totalQuantity = volume;
-      evidence.push({ field: "itemQuantity", raw: volume.raw, origin: "meta", rule: "structured_volume" });
+      itemQuantity = contents;
+      totalQuantity = contents;
+      blockUnitPrice = false;
+      evidence.push({
+        field: "itemQuantity",
+        raw: contents.raw,
+        origin: "meta",
+        rule: contents.kind === "mass" ? "structured_mass" : "structured_volume",
+      });
     }
 
     if (identity.brand) evidence.push({ field: "brand", raw: identity.brand, origin: "column", rule: "identity_column" });
@@ -122,6 +151,8 @@ export const snkAdapter: SourceAdapter = {
         itemQuantity,
         totalQuantity,
         bundleBlocked: titleOffer.bundleBlocked,
+        blockUnitPrice,
+        blockPieceUnitPrice: titleOffer.mixedSetBlocked,
       },
       specifications: {
         dimensions: titleOffer.dimensions,

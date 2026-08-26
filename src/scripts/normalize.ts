@@ -157,7 +157,10 @@ async function main(): Promise<void> {
       console.log(`  ${warning.code}: ${warning.count}`);
     }
     console.log(
-      `Duplicates (${source.duplicates.key}): extraRows=${source.duplicates.extraRows} keys=${source.duplicates.uniqueDuplicateKeys}`,
+      `Duplicates exact (${source.duplicates.exactRepeatedRecord.key}): extraRows=${source.duplicates.exactRepeatedRecord.extraRows} keys=${source.duplicates.exactRepeatedRecord.uniqueDuplicateKeys}`,
+    );
+    console.log(
+      `Duplicates source_id (${source.duplicates.repeatedSourceId.key}): extraRows=${source.duplicates.repeatedSourceId.extraRows} keys=${source.duplicates.repeatedSourceId.uniqueDuplicateKeys}`,
     );
     for (const signal of source.independentSignals) {
       console.log(

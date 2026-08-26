@@ -4,11 +4,16 @@ const EXAMPLE_LIMIT = 4;
 
 export type Counted = { code: string; count: number };
 
-export type DuplicateStats = {
+export type DuplicateBucket = {
   key: string;
   extraRows: number;
   uniqueDuplicateKeys: number;
   examples: string[];
+};
+
+export type DuplicateStats = {
+  exactRepeatedRecord: DuplicateBucket;
+  repeatedSourceId: DuplicateBucket;
 };
 
 export type IndependentSignal = {
@@ -73,20 +78,27 @@ export type ExampleGroup = {
   products: NormalizedProduct[];
 };
 
-/** Build the strongest available row identifier without assuming source_id is unique alone. */
-function duplicateIdentityKey(product: NormalizedProduct): string | null {
-  const identifiers: string[] = [];
-  if (product.identity.sourceId) identifiers.push(`source_id=${product.identity.sourceId}`);
-  if (product.identity.recordId) identifiers.push(`record_id=${product.identity.recordId}`);
-  if (identifiers.length === 0) return null;
-  return `${product.identity.source}|${product.identity.countryCode ?? ""}|${identifiers.join("|")}`;
+/** Build the strongest available exact-record identifier. */
+function exactRecordKey(product: NormalizedProduct): string | null {
+  if (!product.identity.sourceId || !product.identity.recordId) return null;
+  return `${product.identity.source}|${product.identity.countryCode ?? ""}|source_id=${product.identity.sourceId}|record_id=${product.identity.recordId}`;
 }
 
-/** Count duplicate rows using every available source/record identifier without dropping rows. */
-export function findDuplicates(products: NormalizedProduct[]): DuplicateStats {
+/** Repeated source_id within one source/market, regardless of record_id. */
+function sourceIdMarketKey(product: NormalizedProduct): string | null {
+  if (!product.identity.sourceId) return null;
+  return `${product.identity.source}|${product.identity.countryCode ?? ""}|source_id=${product.identity.sourceId}`;
+}
+
+/** Count extra rows for one identifier function without dropping any products. */
+function countDuplicateBucket(
+  products: NormalizedProduct[],
+  keyOf: (product: NormalizedProduct) => string | null,
+  keyLabel: string,
+): DuplicateBucket {
   const counts = new Map<string, number>();
   for (const product of products) {
-    const key = duplicateIdentityKey(product);
+    const key = keyOf(product);
     if (!key) continue;
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
@@ -102,10 +114,29 @@ export function findDuplicates(products: NormalizedProduct[]): DuplicateStats {
   }
 
   return {
-    key: "source|country_code|available source_id+record_id",
+    key: keyLabel,
     extraRows,
     uniqueDuplicateKeys,
     examples,
+  };
+}
+
+/**
+ * Dataset-level duplicate metrics. Rows are never auto-deduplicated.
+ * Exact repeats and reused source_id values are counted separately.
+ */
+export function findDuplicates(products: NormalizedProduct[]): DuplicateStats {
+  return {
+    exactRepeatedRecord: countDuplicateBucket(
+      products,
+      exactRecordKey,
+      "source|country_code|source_id|record_id",
+    ),
+    repeatedSourceId: countDuplicateBucket(
+      products,
+      sourceIdMarketKey,
+      "source|country_code|source_id",
+    ),
   };
 }
 
@@ -260,11 +291,10 @@ const EXAMPLE_RULES: ExampleRule[] = [
     match: (product) => product.offer.denominatorStatus === "blocked_bundle",
   },
   {
-    id: "mkv-no-denominator",
-    label: "MKV normal case: no unit-price denominator",
+    id: "mkv-mixed-set",
+    label: "MKV rinkinys/komplektas (no €/piece)",
     source: "MKV",
-    match: (product) =>
-      product.offer.denominatorStatus === "not_applicable" && product.quality.warnings.length === 0,
+    match: (product) => product.quality.warnings.some((item) => item.code === "mixed_item_set"),
   },
   {
     id: "mkv-ambiguous",

@@ -27,7 +27,9 @@ export function finalizeOffer(draft: AdapterDraft): NormalizedProduct["offer"] {
     !totalQuantity &&
     draft.offer.itemQuantity &&
     draft.offer.packageCount != null &&
-    draft.offer.packageCount > 0
+    draft.offer.packageCount > 0 &&
+    !draft.offer.blockUnitPrice &&
+    !draft.offer.blockPieceUnitPrice
   ) {
     totalQuantity = {
       value: draft.offer.itemQuantity.value * draft.offer.packageCount,
@@ -39,6 +41,8 @@ export function finalizeOffer(draft: AdapterDraft): NormalizedProduct["offer"] {
 
   const denominatorStatus = resolveDenominatorStatus({
     bundleBlocked: draft.offer.bundleBlocked,
+    blockUnitPrice: draft.offer.blockUnitPrice,
+    blockPieceUnitPrice: draft.offer.blockPieceUnitPrice,
     packageCount: draft.offer.packageCount,
     totalQuantity,
     itemQuantity: draft.offer.itemQuantity,

@@ -24,7 +24,10 @@ const validMetrics = {
       warningRows: 0,
       warnings: [],
       byCategory: [],
-      duplicates: { key: "source|country_code|source_id", extraRows: 0, uniqueDuplicateKeys: 0, examples: [] },
+      duplicates: {
+        exactRepeatedRecord: { key: "source|country_code|source_id|record_id", extraRows: 0, uniqueDuplicateKeys: 0, examples: [] },
+        repeatedSourceId: { key: "source|country_code|source_id", extraRows: 0, uniqueDuplicateKeys: 0, examples: [] },
+      },
       independentSignals: [],
     },
   ],
@@ -52,6 +55,17 @@ describe("artifact contract validation", () => {
   it("rejects stale metrics that omit denominatorUnavailable", () => {
     const stale = structuredClone(validMetrics);
     delete (stale.sources[0].offer as { denominatorUnavailable?: number }).denominatorUnavailable;
+    assert.equal(isMetricsDocument(stale), false);
+  });
+
+  it("rejects stale metrics that omit split duplicate buckets", () => {
+    const stale = structuredClone(validMetrics);
+    stale.sources[0].duplicates = {
+      key: "source|country_code|source_id",
+      extraRows: 0,
+      uniqueDuplicateKeys: 0,
+      examples: [],
+    } as never;
     assert.equal(isMetricsDocument(stale), false);
   });
 

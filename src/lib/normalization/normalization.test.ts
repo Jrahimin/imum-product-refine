@@ -5,6 +5,7 @@ import { normalizeRow } from "./pipeline";
 import {
   extractTitleOffer,
   parseLooseNumber,
+  reconcileStructuredPackageCount,
   toCanonicalQuantity,
 } from "./primitives";
 import { deriveUnitPrice, selectComparablePrice } from "./price";
@@ -42,6 +43,13 @@ function mkvRow(overrides: Partial<CsvRow> = {}): CsvRow {
   };
 }
 
+const TITLE_OFF = {
+  allowStandaloneVolume: false,
+  allowStandaloneMass: false,
+  allowPharmacyN: false,
+  allowBareCountXQuantity: false,
+} as const;
+
 describe("number and unit primitives", () => {
   it("treats comma as a decimal separator", () => {
     assert.equal(parseLooseNumber("2,700"), 2.7);
@@ -73,50 +81,44 @@ describe("number and unit primitives", () => {
 });
 
 describe("composite package parsing", () => {
-  it("parses quantity × count and count × quantity", () => {
-    const foam = extractTitleOffer("PENOSIL 750 ml x 12 vnt.", {
-      allowStandaloneVolume: false,
-      allowStandaloneMass: false,
-      allowPharmacyN: false,
-    });
+  it("parses quantity × count with an explicit vnt/pcs/gab token", () => {
+    const foam = extractTitleOffer("PENOSIL 750 ml x 12 vnt.", TITLE_OFF);
     assert.equal(foam.packageCount, 12);
     assert.equal(foam.itemQuantity?.value, 0.75);
     assert.equal(foam.itemQuantity?.unit, "L");
     assert.equal(foam.totalQuantity?.value, 9);
 
-    const grams = extractTitleOffer("tabletės 4 x 100 g", {
-      allowStandaloneVolume: false,
-      allowStandaloneMass: false,
-      allowPharmacyN: false,
-    });
-    assert.equal(grams.packageCount, 4);
-    assert.equal(grams.itemQuantity?.value, 0.1);
-    assert.equal(grams.totalQuantity?.value, 0.4);
-
-    const millilitres = extractTitleOffer("ampulės 2 x 185 ml", {
-      allowStandaloneVolume: false,
-      allowStandaloneMass: false,
-      allowPharmacyN: false,
-    });
-    assert.equal(millilitres.packageCount, 2);
-    assert.equal(millilitres.itemQuantity?.value, 0.185);
-    assert.equal(millilitres.totalQuantity?.value, 0.37);
-
-    const catFood = extractTitleOffer("0.085 kg x 12 vnt.", {
-      allowStandaloneVolume: false,
-      allowStandaloneMass: false,
-      allowPharmacyN: false,
-    });
+    const catFood = extractTitleOffer("0.085 kg x 12 vnt.", TITLE_OFF);
     assert.equal(catFood.packageCount, 12);
     assert.equal(catFood.itemQuantity?.value, 0.085);
     assert.equal(catFood.totalQuantity?.value, 1.02);
   });
 
+  it("does not trust bare count × quantity without an adapter opt-in", () => {
+    const grams = extractTitleOffer("tabletės 4 x 100 g", TITLE_OFF);
+    assert.equal(grams.packageCount, null);
+    assert.equal(grams.itemQuantity, null);
+    assert.equal(grams.totalQuantity, null);
+
+    const millilitres = extractTitleOffer("ampulės 2 x 185 ml", TITLE_OFF);
+    assert.equal(millilitres.packageCount, null);
+    assert.equal(millilitres.itemQuantity, null);
+  });
+
+  it("parses bare count × quantity only when the adapter opts in", () => {
+    const grams = extractTitleOffer("tabletės 4 x 100 g", {
+      ...TITLE_OFF,
+      allowBareCountXQuantity: true,
+    });
+    assert.equal(grams.packageCount, 4);
+    assert.equal(grams.itemQuantity?.value, 0.1);
+    assert.equal(grams.totalQuantity?.value, 0.4);
+  });
+
   it("parses parenthetical packs such as 750ml (12 vnt)", () => {
     const foam = extractTitleOffer("Putos 750ml (12 vnt) + pistoletas", {
+      ...TITLE_OFF,
       allowStandaloneVolume: true,
-      allowStandaloneMass: false,
-      allowPharmacyN: false,
     });
     assert.equal(foam.packageCount, 12);
     assert.equal(foam.itemQuantity?.value, 0.75);
@@ -126,9 +128,9 @@ describe("composite package parsing", () => {
 
   it("leaves repeated composite components unresolved instead of selecting the first", () => {
     const set = extractTitleOffer("Rinkinys: 2 x 35 ml kremas, 3 x 35 ml muilas", {
+      ...TITLE_OFF,
       allowStandaloneVolume: true,
-      allowStandaloneMass: false,
-      allowPharmacyN: false,
+      allowBareCountXQuantity: true,
     });
     assert.equal(set.packageCount, null);
     assert.equal(set.itemQuantity, null);
@@ -288,6 +290,105 @@ describe("MKV semantic cases", () => {
     assert.equal(set.specifications.dimensions, null);
     assert.ok(set.quality.warnings.some((item) => item.code === "ambiguous_dimensions"));
   });
+
+  it("uses bare count × quantity for pet-food packs, not bowl capacities", () => {
+    const food = normalizeRow(
+      "MKV",
+      mkvRow({
+        title: "Šunų ėdalas CESAR, višt.ir mork, konservuotas, 4x100 g",
+        category: "GYVŪNŲ PREKĖS",
+        subcategory: "Šunų maistas (sausas ir konservuotas, vitaminai)",
+        final_price: "4",
+      }),
+    );
+    assert.equal(food.offer.packageCount, 4);
+    assert.equal(food.offer.itemQuantity?.value, 0.1);
+    assert.equal(food.offer.totalQuantity?.value, 0.4);
+    assert.equal(food.pricing.unitPrice, 10);
+    assert.equal(food.pricing.unitPriceUnit, "kg");
+
+    const bowl = normalizeRow(
+      "MKV",
+      mkvRow({
+        title: "Dvigubas dubenėlis, metalinis, su stovu, 2 x 550ml",
+        category: "GYVŪNŲ PREKĖS",
+        subcategory: "Gyvūnų aksesuarai",
+        final_price: "12",
+      }),
+    );
+    assert.equal(bowl.offer.packageCount, null);
+    assert.equal(bowl.offer.totalQuantity, null);
+    assert.equal(bowl.pricing.unitPrice, null);
+  });
+
+  it("does not treat metal-profile L tokens as litre packs", () => {
+    const pipe = normalizeRow(
+      "MKV",
+      mkvRow({
+        title: "Vamzdis, 40 x 40 x 2 L - 2 m, kvadratinis",
+        category: "STATYBINĖS MEDŽIAGOS",
+        subcategory: "Metalo gaminiai",
+        final_price: "15",
+      }),
+    );
+    assert.equal(pipe.offer.packageCount, null);
+    assert.equal(pipe.offer.totalQuantity, null);
+    assert.equal(pipe.pricing.unitPrice, null);
+  });
+
+  it("does not price mixed rinkinys/komplektas sets per piece", () => {
+    const mixed = normalizeRow(
+      "MKV",
+      mkvRow({
+        title: "Sodo įrankių komplektas iš 3 dalių TRAMONTINA 78107/809",
+        final_price: "15",
+      }),
+    );
+    assert.equal(mixed.pricing.unitPrice, null);
+
+    const countedSet = normalizeRow(
+      "MKV",
+      mkvRow({
+        title: "Šlifavimo lapelių rinkinys BOSCH, D 125 mm, K 40, 10 vnt.",
+        final_price: "10",
+      }),
+    );
+    assert.equal(countedSet.offer.packageCount, 10);
+    assert.equal(countedSet.pricing.unitPrice, null);
+    assert.equal(countedSet.offer.denominatorStatus, "unavailable");
+    assert.ok(countedSet.quality.warnings.some((item) => item.code === "mixed_item_set"));
+
+    const homogeneous = normalizeRow(
+      "MKV",
+      mkvRow({
+        title: "PENOSIL 750 ml x 12 vnt. rinkinys",
+        category: "DAŽAI IR PARUOŠIMO MEDŽIAGOS",
+        final_price: "36",
+      }),
+    );
+    assert.equal(homogeneous.offer.packageCount, 12);
+    assert.equal(homogeneous.offer.totalQuantity?.value, 9);
+    assert.equal(homogeneous.pricing.unitPrice, 4);
+    assert.equal(homogeneous.pricing.unitPriceUnit, "L");
+  });
+
+  it("preserves source-native lookup fields without using them for pricing", () => {
+    const product = normalizeRow(
+      "MKV",
+      mkvRow({
+        title: "Kibiras",
+        product_code: "MKV-99",
+        internal_product_code: "INT-1",
+        in_stock: "1",
+        url: "https://example.test/p/99",
+      }),
+    );
+    assert.equal(product.specifications.extra.productCode, "MKV-99");
+    assert.equal(product.specifications.extra.internalProductCode, "INT-1");
+    assert.equal(product.specifications.extra.inStock, "1");
+    assert.equal(product.specifications.extra.url, "https://example.test/p/99");
+    assert.equal(product.pricing.unitPrice, null);
+  });
 });
 
 describe("pricing policy", () => {
@@ -359,6 +460,56 @@ describe("SNK, TOP, and BNU adapters", () => {
     assert.equal(product.offer.packageCount, 8);
     assert.ok(product.quality.warnings.some((item) => item.code === "title_meta_package_mismatch"));
     assert.ok(product.evidence.some((item) => item.rule === "structured_package_count"));
+  });
+
+  it("recomputes a title-derived total when a structured pack count overrides a composite", () => {
+    const product = normalizeRow("SNK", {
+      title: "PENOSIL 750 ml x 12 vnt.",
+      final_price: "36",
+      meta: JSON.stringify({ extra: { "Vienetai pakuotėje": "8" } }),
+    });
+    assert.equal(product.offer.packageCount, 8);
+    assert.equal(product.offer.itemQuantity?.value, 0.75);
+    assert.equal(product.offer.totalQuantity?.value, 6);
+    assert.equal(product.pricing.unitPrice, 6);
+    assert.ok(product.quality.warnings.some((item) => item.code === "title_meta_package_mismatch"));
+  });
+
+  it("clears an inconsistent derived total when item × count cannot be recomputed safely", () => {
+    const result = reconcileStructuredPackageCount(
+      {
+        packageCount: 12,
+        itemQuantity: { value: 0.75, unit: "L", kind: "volume", raw: "750 ml" },
+        totalQuantity: { value: 1.44, unit: "m2", kind: "area", raw: "1,44 m2/dėž." },
+      },
+      8,
+      "8",
+    );
+    assert.equal(result.mismatched, true);
+    assert.equal(result.blockUnitPrice, true);
+    assert.equal(result.itemQuantity, null);
+    assert.equal(result.totalQuantity, null);
+    assert.equal(result.packageCount, 8);
+  });
+
+  it("uses SNK Kiekis pakuotėje, kg as contents and ignores generic Svoris", () => {
+    const cement = normalizeRow("SNK", {
+      title: "Pilkas cementas Rocket M800, 42.5 R, 35 kg",
+      final_price: "7",
+      meta: JSON.stringify({ extra: { "Kiekis pakuotėje, kg": "35" } }),
+    });
+    assert.equal(cement.offer.totalQuantity?.value, 35);
+    assert.equal(cement.offer.totalQuantity?.unit, "kg");
+    assert.equal(cement.pricing.unitPriceUnit, "kg");
+    assert.ok(cement.evidence.some((item) => item.rule === "structured_mass"));
+
+    const glue = normalizeRow("SNK", {
+      title: "Klijai parketo Kiilto MS Silex, 10 l, balta sp.",
+      final_price: "40",
+      meta: JSON.stringify({ extra: { Svoris: "17 kg", "Prekės tipas": "Klijai" } }),
+    });
+    assert.equal(glue.offer.totalQuantity, null);
+    assert.equal(glue.pricing.unitPrice, null);
   });
 
   it("uses generic SNK Tūris only with title agreement and non-capacity context", () => {
@@ -473,12 +624,15 @@ describe("SNK, TOP, and BNU adapters", () => {
 });
 
 describe("dataset integrity metrics", () => {
-  it("uses record_id to distinguish rows that reuse source_id", () => {
-    const first = normalizeRow("MKV", mkvRow({ source_id: "same", record_id: "1" }));
-    const second = normalizeRow("MKV", mkvRow({ source_id: "same", record_id: "2" }));
-    const repeated = normalizeRow("MKV", mkvRow({ source_id: "same", record_id: "2" }));
-    const duplicates = findDuplicates([first, second, repeated]);
-    assert.equal(duplicates.extraRows, 1);
-    assert.equal(duplicates.uniqueDuplicateKeys, 1);
+  it("separates exact repeated records from reused source_id within a market", () => {
+    const first = normalizeRow("MKV", mkvRow({ source_id: "same", record_id: "1", country_code: "LT" }));
+    const second = normalizeRow("MKV", mkvRow({ source_id: "same", record_id: "2", country_code: "LT" }));
+    const repeated = normalizeRow("MKV", mkvRow({ source_id: "same", record_id: "2", country_code: "LT" }));
+    const otherMarket = normalizeRow("MKV", mkvRow({ source_id: "same", record_id: "1", country_code: "LV" }));
+    const duplicates = findDuplicates([first, second, repeated, otherMarket]);
+    assert.equal(duplicates.exactRepeatedRecord.extraRows, 1);
+    assert.equal(duplicates.exactRepeatedRecord.uniqueDuplicateKeys, 1);
+    assert.equal(duplicates.repeatedSourceId.extraRows, 2);
+    assert.equal(duplicates.repeatedSourceId.uniqueDuplicateKeys, 1);
   });
 });

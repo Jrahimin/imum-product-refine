@@ -1,13 +1,15 @@
 import type { CsvRow } from "../../csv";
 import { emptyToNull, extractTitleOffer } from "../primitives";
 import type { AdapterDraft, SourceAdapter } from "./types";
-import { text } from "./types";
+import { copyNativeFields, text } from "./types";
 
 const PAINT_CATEGORY = "DAŽAI IR PARUOŠIMO MEDŽIAGOS";
 const AUTO_CATEGORY = "AUTOMOBILIŲ PREKĖS";
 const PET_CATEGORY = "GYVŪNŲ PREKĖS";
 const PAINT_TOOL_SUBCATEGORY = "Įrankiai dažymui";
 const SHEET_MATERIAL_SUBCATEGORY = "Juostelės, plėvelės";
+const HOUSEHOLD_CHEMISTRY_SUBSUB = "Buitinė chemija";
+const AGROCHEM_SUBCATEGORY = "Agrochemija";
 
 const SPEC_COLUMNS = ["length", "width", "height", "depth", "weight", "power", "color", "dimensions"] as const;
 
@@ -30,6 +32,16 @@ function allowsStandaloneMass(row: CsvRow, category: string | null, title: strin
   if (category !== PET_CATEGORY) return false;
   const subcategory = text(row, "subcategory") ?? "";
   return /maistas|kraikas/i.test(subcategory);
+}
+
+/** Allow bare `4 x 100 g` only where the catalogue path describes identical consumable packs. */
+function allowsBareCountXQuantity(row: CsvRow, category: string | null, title: string): boolean {
+  if (category === PET_CATEGORY) return allowsStandaloneMass(row, category, title);
+  if (category === PAINT_CATEGORY) return allowsStandaloneVolume(row, category);
+  if (text(row, "subsubcategory") === HOUSEHOLD_CHEMISTRY_SUBSUB) return true;
+  if (text(row, "subcategory") === AGROCHEM_SUBCATEGORY) return true;
+  // A few pet-food rows are miscategorised; the title still names the consumable.
+  return /\b(?:ėdalas|konserv(?:ai|uotas))\b/i.test(title);
 }
 
 /** Map one MKV row into the common draft. MKV `N4`/`N8` are not pharmacy packs. */
@@ -65,6 +77,7 @@ export const mkvAdapter: SourceAdapter = {
       allowStandaloneVolume: allowsStandaloneVolume(row, category),
       allowStandaloneMass: allowsStandaloneMass(row, category, title),
       allowPharmacyN: false,
+      allowBareCountXQuantity: allowsBareCountXQuantity(row, category, title),
     });
 
     // specifications — structured physical fields are identity, not price bases
@@ -73,6 +86,7 @@ export const mkvAdapter: SourceAdapter = {
       const value = text(row, field);
       if (value) extra[field] = value;
     }
+    copyNativeFields(row, extra);
 
     const evidence = [...titleOffer.evidence];
     if (identity.brand) evidence.push({ field: "brand", raw: identity.brand, origin: "column", rule: "identity_column" });
@@ -87,6 +101,8 @@ export const mkvAdapter: SourceAdapter = {
         itemQuantity: titleOffer.itemQuantity,
         totalQuantity: titleOffer.totalQuantity,
         bundleBlocked: titleOffer.bundleBlocked,
+        blockUnitPrice: false,
+        blockPieceUnitPrice: titleOffer.mixedSetBlocked,
       },
       specifications: {
         dimensions: titleOffer.dimensions,

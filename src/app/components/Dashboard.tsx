@@ -164,8 +164,14 @@ export function Dashboard({
             <article className="signal-card" key={source.source}>
               <h3>{source.source}</h3>
               <p>
-                Duplicate extra rows ({source.duplicates.key}): {source.duplicates.extraRows}
+                Exact repeated records ({source.duplicates.exactRepeatedRecord.key}):{" "}
+                {source.duplicates.exactRepeatedRecord.extraRows}
               </p>
+              <p>
+                Repeated source_id within source/market ({source.duplicates.repeatedSourceId.key}):{" "}
+                {source.duplicates.repeatedSourceId.extraRows}
+              </p>
+              <p className="note">Rows are never auto-deduplicated.</p>
               {source.warnings.length === 0 ? (
                 <p>No row-level warnings.</p>
               ) : (

@@ -40,6 +40,12 @@ function isOfferMetrics(value: unknown): boolean {
   );
 }
 
+/** True when one duplicate bucket matches the current metrics contract. */
+function isDuplicateBucket(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return typeof value.key === "string" && isNumber(value.extraRows) && isNumber(value.uniqueDuplicateKeys);
+}
+
 /** True when one source block matches the current metrics contract. */
 function isSourceMetrics(value: unknown): value is SourceMetrics {
   if (!isRecord(value)) return false;
@@ -50,7 +56,8 @@ function isSourceMetrics(value: unknown): value is SourceMetrics {
   if (!Array.isArray(value.warnings) || !Array.isArray(value.byCategory) || !Array.isArray(value.independentSignals)) {
     return false;
   }
-  return isRecord(value.duplicates) && typeof value.duplicates.key === "string";
+  if (!isRecord(value.duplicates)) return false;
+  return isDuplicateBucket(value.duplicates.exactRepeatedRecord) && isDuplicateBucket(value.duplicates.repeatedSourceId);
 }
 
 /** True when metrics.json matches the dashboard contract rather than an older artifact. */
