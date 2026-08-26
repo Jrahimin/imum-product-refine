@@ -9,7 +9,7 @@ import {
 } from "../primitives";
 import type { EvidenceItem, Quantity } from "../types";
 import type { AdapterDraft, SourceAdapter } from "./types";
-import { copyNativeFields, text } from "./types";
+import { copyNativeFields, identityText, text } from "./types";
 
 const SPEC_COLUMNS = ["length", "width", "height", "depth", "weight", "power", "color", "dimensions"] as const;
 
@@ -32,6 +32,15 @@ function titleHasExplicitComposite(evidence: EvidenceItem[]): boolean {
   );
 }
 
+/** True when SNK taxonomy/title clearly names pet food or litter, not generic catalogue weight. */
+function allowsSnkPetConsumableMass(row: CsvRow, title: string): boolean {
+  const category = row.category ?? "";
+  const productType = metaExtraValue(row.meta, "Prekės tipas") ?? "";
+  const haystack = `${category} ${productType} ${title}`;
+  if (!/gyvūn/i.test(`${category} ${productType}`)) return false;
+  return /maistas|ėdalas|kraikas|pašaras/i.test(haystack);
+}
+
 /** True when two quantities are the same canonical amount. */
 function quantitiesEqual(left: Quantity | null, right: Quantity): boolean {
   return left != null && left.unit === right.unit && left.kind === right.kind && left.value === right.value;
@@ -50,9 +59,9 @@ export const snkAdapter: SourceAdapter = {
       sourceId: text(row, "source_id"),
       recordId: text(row, "record_id"),
       title,
-      brand: text(row, "brand"),
-      manufacturer: text(row, "manufacturer"),
-      model: text(row, "model"),
+      brand: identityText(row, "brand"),
+      manufacturer: identityText(row, "manufacturer"),
+      model: identityText(row, "model"),
       barcode: text(row, "barcode"),
     };
 
@@ -66,7 +75,7 @@ export const snkAdapter: SourceAdapter = {
 
     const titleOffer = extractTitleOffer(title, {
       allowStandaloneVolume: false,
-      allowStandaloneMass: false,
+      allowStandaloneMass: allowsSnkPetConsumableMass(row, title),
       allowPharmacyN: false,
       allowBareCountXQuantity: false,
     });

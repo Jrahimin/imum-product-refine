@@ -185,8 +185,10 @@ export function Dashboard({
               )}
               {source.independentSignals.map((signal) => (
                 <p key={signal.name} className="signal">
-                  {signal.name}: {signal.agree}/{signal.compared} agree
-                  {signal.disagree ? ` · ${signal.disagree} disagree` : ""}
+                  Independent/raw validation ({signal.name}): {signal.agree}/{signal.compared} agree
+                  {signal.disagree
+                    ? ` · ${signal.disagree} raw disagreements (not normalization failures)`
+                    : ""}
                 </p>
               ))}
             </article>

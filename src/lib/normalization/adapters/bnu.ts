@@ -9,7 +9,7 @@ import {
   reconcileStructuredPackageCount,
 } from "../primitives";
 import type { AdapterDraft, SourceAdapter } from "./types";
-import { copyNativeFields, text } from "./types";
+import { copyNativeFields, identityText, text } from "./types";
 
 /** Map BNU pharmacy fields onto the common model without treating mg as a pack. */
 export const bnuAdapter: SourceAdapter = {
@@ -24,9 +24,9 @@ export const bnuAdapter: SourceAdapter = {
       sourceId: text(row, "source_id"),
       recordId: text(row, "record_id"),
       title,
-      brand: text(row, "brand"),
-      manufacturer: text(row, "manufacturer"),
-      model: text(row, "model"),
+      brand: identityText(row, "brand"),
+      manufacturer: identityText(row, "manufacturer"),
+      model: identityText(row, "model"),
       barcode: text(row, "barcode"),
     };
 

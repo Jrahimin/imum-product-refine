@@ -1,7 +1,7 @@
 import type { CsvRow } from "../../csv";
 import { emptyToNull, extractTitleOffer, parseDimensions, parseJsonObject } from "../primitives";
 import type { AdapterDraft, SourceAdapter } from "./types";
-import { copyNativeFields, text } from "./types";
+import { copyNativeFields, identityText, text } from "./types";
 
 const SPEC_COLUMNS = ["length", "width", "height", "depth", "weight", "power", "color", "dimensions"] as const;
 
@@ -18,9 +18,9 @@ export const topAdapter: SourceAdapter = {
       sourceId: text(row, "source_id"),
       recordId: text(row, "record_id"),
       title,
-      brand: text(row, "brand"),
-      manufacturer: text(row, "manufacturer"),
-      model: text(row, "model"),
+      brand: identityText(row, "brand"),
+      manufacturer: identityText(row, "manufacturer"),
+      model: identityText(row, "model"),
       barcode: text(row, "barcode"),
     };
 

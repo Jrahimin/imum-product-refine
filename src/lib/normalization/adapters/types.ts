@@ -23,6 +23,15 @@ export function text(row: CsvRow, field: string): string | null {
   return value ? value : null;
 }
 
+const IDENTITY_PLACEHOLDERS = new Set(["-", "–", "—"]);
+
+/** Read an identity cell, mapping catalogue placeholders such as `-` to null. */
+export function identityText(row: CsvRow, field: string): string | null {
+  const value = text(row, field);
+  if (value == null || IDENTITY_PLACEHOLDERS.has(value)) return null;
+  return value;
+}
+
 const NATIVE_SPEC_FIELDS = [
   ["product_code", "productCode"],
   ["internal_product_code", "internalProductCode"],

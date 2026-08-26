@@ -1,13 +1,12 @@
 import type { CsvRow } from "../../csv";
 import { emptyToNull, extractTitleOffer } from "../primitives";
 import type { AdapterDraft, SourceAdapter } from "./types";
-import { copyNativeFields, text } from "./types";
+import { copyNativeFields, identityText, text } from "./types";
 
 const PAINT_CATEGORY = "DAŽAI IR PARUOŠIMO MEDŽIAGOS";
 const AUTO_CATEGORY = "AUTOMOBILIŲ PREKĖS";
 const PET_CATEGORY = "GYVŪNŲ PREKĖS";
 const PAINT_TOOL_SUBCATEGORY = "Įrankiai dažymui";
-const SHEET_MATERIAL_SUBCATEGORY = "Juostelės, plėvelės";
 const HOUSEHOLD_CHEMISTRY_SUBSUB = "Buitinė chemija";
 const AGROCHEM_SUBCATEGORY = "Agrochemija";
 
@@ -22,16 +21,15 @@ function allowsStandaloneVolume(row: CsvRow, category: string | null): boolean {
   return category === AUTO_CATEGORY && text(row, "subcategory") === "Auto chemija";
 }
 
-/** Allow lone mass only for consumables, excluding capacity and material-density contexts. */
+/** Allow lone mass only for clearly identified pet-food/consumable contents. */
 function allowsStandaloneMass(row: CsvRow, category: string | null, title: string): boolean {
   if (/\b(?:ne daugiau kaip|atlaikomas svoris|iki)\b/i.test(title)) return false;
-  if (category === PAINT_CATEGORY) {
-    const subsubcategory = text(row, "subsubcategory");
-    return subsubcategory !== PAINT_TOOL_SUBCATEGORY && subsubcategory !== SHEET_MATERIAL_SUBCATEGORY;
+  if (category === PET_CATEGORY) {
+    const subcategory = text(row, "subcategory") ?? "";
+    return /maistas|kraikas/i.test(subcategory);
   }
-  if (category !== PET_CATEGORY) return false;
-  const subcategory = text(row, "subcategory") ?? "";
-  return /maistas|kraikas/i.test(subcategory);
+  // Miscategorised pet food still names the consumable; do not enable paint/hardware mass here.
+  return /\b(?:ėdalas|konserv(?:ai|uotas))\b/i.test(title);
 }
 
 /** Allow bare `4 x 100 g` only where the catalogue path describes identical consumable packs. */
@@ -58,9 +56,9 @@ export const mkvAdapter: SourceAdapter = {
       sourceId: text(row, "source_id"),
       recordId: text(row, "record_id"),
       title,
-      brand: text(row, "brand"),
-      manufacturer: text(row, "manufacturer"),
-      model: text(row, "model"),
+      brand: identityText(row, "brand"),
+      manufacturer: identityText(row, "manufacturer"),
+      model: identityText(row, "model"),
       barcode: text(row, "barcode"),
     };
 

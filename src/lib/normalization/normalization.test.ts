@@ -137,6 +137,23 @@ describe("composite package parsing", () => {
     assert.equal(set.totalQuantity, null);
     assert.ok(set.warnings.some((item) => item.code === "ambiguous_quantity_role"));
   });
+
+  it("multiplies nested piece packs such as 4x15 vnt. and leaves mixed nested packs unresolved", () => {
+    const bags = extractTitleOffer("Maišeliai HIPPIE PET, 4x15 vnt.", TITLE_OFF);
+    assert.equal(bags.packageCount, 60);
+    assert.equal(bags.packageCountRaw, "4x15 vnt.");
+    assert.ok(bags.evidence.some((item) => item.rule === "nested_piece_pack"));
+
+    const pcs = extractTitleOffer("Maišeliai Trixie 4x20 pcs", TITLE_OFF);
+    assert.equal(pcs.packageCount, 80);
+
+    const mixed = extractTitleOffer(
+      "Gipso kartono sraigtai 3.5x35(2x1000 vnt) + kalami kaiščiai 6.0x40 (1x200 vnt.)",
+      TITLE_OFF,
+    );
+    assert.equal(mixed.packageCount, null);
+    assert.ok(mixed.warnings.some((item) => item.code === "ambiguous_quantity_role"));
+  });
 });
 
 describe("MKV semantic cases", () => {
@@ -389,6 +406,46 @@ describe("MKV semantic cases", () => {
     assert.equal(product.specifications.extra.url, "https://example.test/p/99");
     assert.equal(product.pricing.unitPrice, null);
   });
+
+  it("prices nested piece packs from the product of both counts", () => {
+    const product = normalizeRow(
+      "MKV",
+      mkvRow({
+        title: "Maišeliai HIPPIE PET, šunų ekskrementams, citrinų kvapo, 4x15 vnt.",
+        final_price: "6",
+      }),
+    );
+    assert.equal(product.offer.packageCount, 60);
+    assert.equal(product.pricing.unitPrice, 0.1);
+    assert.equal(product.pricing.unitPriceUnit, "piece");
+  });
+
+  it("uses standalone mass only for identified pet-food contents, not dual kg/L litter specs", () => {
+    const food = normalizeRow(
+      "MKV",
+      mkvRow({
+        title: "Maistas jūrų kiaulytėms FREDDY, visavertis, 800g",
+        category: "GYVŪNŲ PREKĖS",
+        subcategory: "Gyvūnų maistas (paukščių, graužikų maistas, žuvų pašarai)",
+        final_price: "4",
+      }),
+    );
+    assert.equal(food.offer.totalQuantity?.value, 0.8);
+    assert.equal(food.offer.totalQuantity?.unit, "kg");
+    assert.equal(food.pricing.unitPrice, 5);
+
+    const litter = normalizeRow(
+      "MKV",
+      mkvRow({
+        title: "Kraikas katėms, originalus, 2mm granulės, 2.6 kg/6 l MR",
+        category: "GYVŪNŲ PREKĖS",
+        subcategory: "Kraikas",
+        final_price: "8",
+      }),
+    );
+    assert.equal(litter.offer.totalQuantity, null);
+    assert.equal(litter.pricing.unitPrice, null);
+  });
 });
 
 describe("pricing policy", () => {
@@ -566,6 +623,27 @@ describe("SNK, TOP, and BNU adapters", () => {
     assert.equal(bucket.offer.totalQuantity, null);
     assert.equal(bucket.pricing.unitPrice, null);
     assert.equal(bucket.specifications.extra.volumeRaw, "10 l");
+  });
+
+  it("maps placeholder SNK brand/model dashes to null and uses pet-food title mass only", () => {
+    const placeholder = normalizeRow("SNK", {
+      title: "Guminiai batai moterims Demar",
+      brand: "-",
+      model: "-",
+      final_price: "20",
+    });
+    assert.equal(placeholder.identity.brand, null);
+    assert.equal(placeholder.identity.model, null);
+
+    const food = normalizeRow("SNK", {
+      title: "Sausas šunų maistas Royal Canin SHN Maxi Adult, 15 kg",
+      category: "Gyvūnų prekės",
+      final_price: "30",
+      meta: JSON.stringify({ extra: { "Prekės tipas": "Sausas šunų maistas", Svoris: "15 kg" } }),
+    });
+    assert.equal(food.offer.totalQuantity?.value, 15);
+    assert.equal(food.offer.totalQuantity?.unit, "kg");
+    assert.equal(food.pricing.unitPriceUnit, "kg");
   });
 
   it("keeps TOP identity useful when no pricing denominator exists", () => {

@@ -62,5 +62,7 @@ npm run lint
 - `rinkinys` / `komplektas` titles do not get €/piece unless the set is a homogeneous identical-item composite.
 - Generic SNK `Tūris` is a single-product quantity only when the title agrees, the product is not a container, and no pack/composite is competing. `Kiekis pakuotėje, l/kg` is the package total. A title composite such as `750 ml x 12 vnt.` is not overwritten by structured volume.
 - A `+` character is not a bundle; an extra item such as `+ pistoletas` blocks unit-price comparison.
-- BNU `amount_in_package` is mapped to package count only when it is a clean integer; compound strength remains in the raw specification map.
+- Nested piece packs such as `4x15 vnt.` become the product of both counts. Mixed nested packs stay unset.
+- Catalogue identity placeholders such as `brand="-"` / `model="-"` are stored as null.
+- BNU `title N` vs `amount_in_package` agreement in the dashboard is an independent/raw validation signal, not a count of normalization failures.
 - TOP titles usually have no retail quantity; identity is still useful.

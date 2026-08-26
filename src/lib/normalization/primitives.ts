@@ -48,6 +48,15 @@ const BOX_AREA_RE = new RegExp(
 /** Standalone package count words. `N4` is intentionally excluded. */
 const PACKAGE_COUNT_RE = /(\d+)\s*(?:vnt\.?|pcs|gab\.?)|\b(\d+)vnt\.?/gi;
 
+/** Nested piece packs such as `4x15 vnt.` or `4x20 pcs`. */
+const NESTED_PIECE_PACK_RE = new RegExp(
+  String.raw`(?<![x×]\s*)\b(\d+)\s*[x×]\s*(\d+)\s*(?:vnt\.?|pcs|gab\.?)`,
+  "gi",
+);
+
+/** `2 x 4 x 15 vnt` is not a safe two-factor pack. */
+const TRIPLE_PIECE_PACK_RE = /\b\d+\s*[x×]\s*\d+\s*[x×]\s*\d+\s*(?:vnt\.?|pcs|gab\.?)/i;
+
 /** Dimension pair/triple with an explicit length unit, excluding suffixes of ranges. */
 const DIMENSIONS_RE = new RegExp(
   String.raw`(?<![\d.,-])${NUMBER_TOKEN}\s*[x×]\s*${NUMBER_TOKEN}(?:\s*[x×]\s*${NUMBER_TOKEN})?\s*(mm|cm|m)\b`,
@@ -284,6 +293,25 @@ export function parsePackageCounts(title: string): { count: number; raw: string 
   return found;
 }
 
+/** Collect explicit `count × count + vnt/pcs/gab` packs such as `4x15 vnt.`. */
+export function parseNestedPiecePacks(title: string): { packs: number; perPack: number; total: number; raw: string }[] {
+  const found: { packs: number; perPack: number; total: number; raw: string }[] = [];
+  const re = new RegExp(NESTED_PIECE_PACK_RE.source, NESTED_PIECE_PACK_RE.flags);
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(title)) !== null) {
+    const raw = match[0].trim();
+    const packs = Number(match[1]);
+    const perPack = Number(match[2]);
+    const total = packs * perPack;
+    if (!Number.isInteger(packs) || !Number.isInteger(perPack) || packs <= 0 || perPack <= 0) continue;
+    if (!Number.isSafeInteger(total) || total <= 0) continue;
+    if (!found.some((item) => item.total === total && item.raw === raw)) {
+      found.push({ packs, perPack, total, raw });
+    }
+  }
+  return found;
+}
+
 /**
  * BNU-only: package-style `N20` tokens that are not immediately a strength/volume.
  * Multiple hits stay unresolved rather than guessing which N is the pack.
@@ -443,21 +471,46 @@ export function extractTitleOffer(title: string, options: TitleOfferOptions): Ti
   }
 
   if (packageCount == null) {
-    const counts = parsePackageCounts(title);
-    if (counts.length === 1) {
-      packageCount = counts[0].count;
-      packageCountRaw = counts[0].raw;
-      pushEvidence(evidence, "packageCount", counts[0].raw, "title", "package_count_word");
-    } else if (counts.length > 1) {
-      warn(warnings, "ambiguous_quantity_role", "Title contains more than one package-count token.");
-    } else if (options.allowPharmacyN) {
-      const nCounts = parsePharmacyNCounts(title);
-      if (nCounts.length === 1) {
-        packageCount = nCounts[0].count;
-        packageCountRaw = nCounts[0].raw;
-        pushEvidence(evidence, "packageCount", nCounts[0].raw, "title", "pharmacy_n");
-      } else if (nCounts.length > 1) {
-        warn(warnings, "ambiguous_quantity_role", "Title contains more than one pharmacy N-count.");
+    if (TRIPLE_PIECE_PACK_RE.test(title)) {
+      // A three-factor piece pack cannot be reduced to one denominator without guessing.
+      warn(warnings, "ambiguous_quantity_role", "Title contains a nested piece pack with more than two factors.");
+    } else {
+      const nestedPacks = parseNestedPiecePacks(title);
+      if (nestedPacks.length > 1) {
+        warn(warnings, "ambiguous_quantity_role", "Title contains more than one nested piece-pack pattern.");
+      } else if (nestedPacks.length === 1) {
+        const nested = nestedPacks[0];
+        const extraCounts = parsePackageCounts(title).filter((item) => item.count !== nested.perPack);
+        if (extraCounts.length > 0) {
+          warn(
+            warnings,
+            "ambiguous_quantity_role",
+            "Nested piece pack appears beside another package-count token.",
+          );
+        } else {
+          packageCount = nested.total;
+          packageCountRaw = nested.raw;
+          homogeneousComposite = true;
+          pushEvidence(evidence, "packageCount", nested.raw, "title", "nested_piece_pack");
+        }
+      } else {
+        const counts = parsePackageCounts(title);
+        if (counts.length === 1) {
+          packageCount = counts[0].count;
+          packageCountRaw = counts[0].raw;
+          pushEvidence(evidence, "packageCount", counts[0].raw, "title", "package_count_word");
+        } else if (counts.length > 1) {
+          warn(warnings, "ambiguous_quantity_role", "Title contains more than one package-count token.");
+        } else if (options.allowPharmacyN) {
+          const nCounts = parsePharmacyNCounts(title);
+          if (nCounts.length === 1) {
+            packageCount = nCounts[0].count;
+            packageCountRaw = nCounts[0].raw;
+            pushEvidence(evidence, "packageCount", nCounts[0].raw, "title", "pharmacy_n");
+          } else if (nCounts.length > 1) {
+            warn(warnings, "ambiguous_quantity_role", "Title contains more than one pharmacy N-count.");
+          }
+        }
       }
     }
   }
@@ -499,6 +552,13 @@ export function extractTitleOffer(title: string, options: TitleOfferOptions): Ti
           warnings,
           "ambiguous_quantity_role",
           "Mass appears beside a piece count without an explicit × relationship.",
+        );
+      } else if (volumes.length > 0) {
+        // Litter and similar goods often list kg and litres together; neither is a safe sole denominator.
+        warn(
+          warnings,
+          "ambiguous_quantity_role",
+          "Mass and volume both appear without an explicit package relationship.",
         );
       } else {
         itemQuantity = masses[0];

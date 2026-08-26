@@ -57,7 +57,7 @@ function snkPackageSignal(products: NormalizedProduct[], rows: { title?: string;
   };
 }
 
-/** BNU title N vs amount_in_package, for quality metrics only. */
+/** Independent/raw discovery signal. Disagreements here are not normalization failures. */
 function bnuPackageSignal(
   products: NormalizedProduct[],
   rows: { title?: string; amount_in_package?: string }[],
@@ -87,7 +87,7 @@ function bnuPackageSignal(
   }
 
   return {
-    name: "title_N_vs_amount_in_package",
+    name: "raw_title_N_vs_amount_in_package",
     compared,
     agree,
     disagree,
